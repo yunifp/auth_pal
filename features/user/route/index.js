@@ -11,12 +11,14 @@ const {
   getOpPt,
   getVerifPt,
   getVerifikatorIds,
+  getUsersByIds
 } = require("../controller");
 const {
   uploadConfigs,
 } = require("../../../common/middleware/upload_middleware");
 
 router.get("/", getByPagination);
+router.get("/by-ids", getUsersByIds);
 router.get("/verifikator-ids", getVerifikatorIds);
 router.get("/op-pt/:id_pt", getOpPt);
 router.get("/verif-pt/:id_pt", getVerifPt);

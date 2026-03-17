@@ -14,6 +14,7 @@ const {
   generatePin,
 } = require("../../../utils/stringFormatter");
 const { v4: uuidv4 } = require("uuid");
+const nodemailer = require("nodemailer");
 
 exports.login = async (req, res) => {
   const { user_id, pin, jenis_akun } = req.body;
@@ -479,4 +480,112 @@ const buildMenuTree = (menus) => {
   });
 
   return tree;
+};
+exports.forgotPin = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return failResponse(res, "Email wajib diisi", 400);
+    }
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return failResponse(res, "Email tidak terdaftar di sistem kami", 404);
+    }
+
+    // 1. Buat secret unik (menggunakan PIN saat ini)
+    const secret = process.env.JWT_SECRET + user.pin;
+    
+    // 2. Buat payload dan token (berlaku 15 menit)
+    const payload = { email: user.email, id: user.id };
+    const token = jwt.sign(payload, secret, { expiresIn: "15m" });
+
+    // 3. Buat URL reset PIN (Sesuaikan port frontend Anda)
+    const frontendUrl = "https://beasiswa.dev-palma.my.id"; 
+    const resetLink = `${frontendUrl}/reset-pin/${user.id}/${token}`;
+
+    // 4. Setup Nodemailer Transporter menggunakan data dari config.env
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === "true", // true untuk port 465
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    // 5. Desain Email dan Kirim
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME}" <${process.env.SMTP_USER}>`,
+      to: user.email,
+      subject: "Permintaan Reset PIN - Aplikasi Palma",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+          <h2 style="color: #2e7d32; text-align: center;">Reset PIN Anda</h2>
+          <p>Halo <b>${user.nama_lengkap}</b>,</p>
+          <p>Kami menerima permintaan untuk melakukan reset PIN pada akun Anda. Silakan klik tombol di bawah ini untuk membuat PIN baru:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetLink}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset PIN Sekarang</a>
+          </div>
+          <p>Atau Anda dapat menyalin tautan berikut ke browser Anda:</p>
+          <p style="word-break: break-all; color: #555;"><i>${resetLink}</i></p>
+          <p style="color: red; font-size: 12px;">*Tautan ini hanya berlaku selama 15 menit. Jika Anda tidak merasa meminta reset PIN, abaikan email ini.</p>
+          <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
+          <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
+        </div>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return successResponse(res, "Link reset PIN telah berhasil dikirim ke email Anda");
+  } catch (error) {
+    console.error("ERROR FORGOT PIN:", error);
+    return errorResponse(res, "Gagal mengirim email. Pastikan konfigurasi SMTP benar.");
+  }
+};
+
+exports.resetPin = async (req, res) => {
+  try {
+    const { id, token } = req.params;
+    const { new_pin } = req.body;
+
+    if (!id || !token || !new_pin) {
+      return failResponse(res, "Data tidak lengkap", 400);
+    }
+
+    // 1. Cari user
+    const user = await User.findByPk(id);
+    if (!user) {
+      return failResponse(res, "User tidak ditemukan", 404);
+    }
+
+    // 2. Buat secret unik yang sama dengan saat token dibuat
+    const secret = process.env.JWT_SECRET + user.pin;
+
+    // 3. Verifikasi token
+    try {
+      jwt.verify(token, secret);
+    } catch (err) {
+      return failResponse(res, "Link reset PIN tidak valid atau sudah kedaluwarsa", 400);
+    }
+
+    // 4. Hash PIN baru dan simpan menggunakan argon2
+    const hashedPin = await argon2.hash(String(new_pin));
+    
+    await User.update(
+      { 
+        pin: hashedPin,
+        telah_ganti_pin: "Y" 
+      }, 
+      { where: { id: user.id } }
+    );
+
+    return successResponse(res, "PIN berhasil direset. Silakan login menggunakan PIN baru Anda.");
+  } catch (error) {
+    console.error("ERROR RESET PIN:", error);
+    return errorResponse(res, "Internal Server Error");
+  }
 };

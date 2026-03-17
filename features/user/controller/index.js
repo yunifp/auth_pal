@@ -360,3 +360,23 @@ exports.getVerifikatorIds = async (req, res) => {
     return res.status(500).json(errorResponse("Internal Server Error"));
   }
 };
+
+// user controller auth service
+exports.getUsersByIds = async (req, res) => {
+  try {
+    const { ids } = req.query;
+    if (!ids) return successResponse(res, "Data berhasil dimuat", []);
+
+    const idArray = ids.split(",").map(Number).filter((id) => !isNaN(id) && id > 0);
+
+    const users = await User.findAll({
+      where: { id: { [Op.in]: idArray } },
+      attributes: ["id", "nama_lengkap"],
+    });
+
+    return successResponse(res, "Data berhasil dimuat", users);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json(errorResponse("Internal Server Error"));
+  }
+};
