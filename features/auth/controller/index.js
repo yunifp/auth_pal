@@ -16,11 +16,21 @@ const {
 const { v4: uuidv4 } = require("uuid");
 const nodemailer = require("nodemailer");
 
+const captchaStore = {};
+
 exports.login = async (req, res) => {
-  const { user_id, pin, jenis_akun } = req.body;
+  const { user_id, pin, jenis_akun, captchaId, answer } = req.body;
+
+  if (!captchaId || answer === undefined) {
+    return failResponse(res, "Silakan selesaikan hitungan captcha terlebih dahulu", 400);
+  }
+  if (!(captchaId in captchaStore) || captchaStore[captchaId] !== Number(answer)) {
+    if (captchaId in captchaStore) delete captchaStore[captchaId]; // Hapus jika salah agar tidak bisa di-bruteforce
+    return failResponse(res, "Jawaban captcha salah atau kedaluwarsa", 400);
+  }
+  delete captchaStore[captchaId];
 
   try {
-    // Ambil user + roles sekaligus
     const user = await User.findOne({
       where: { user_id },
       include: [{ model: Role, through: { attributes: [] } }],
@@ -34,10 +44,8 @@ exports.login = async (req, res) => {
     if (!user.is_active)
       return failResponse(res, "Akun anda belum diverifikasi", 200);
 
-    // Ambil semua id_role user, contoh: [1, 2]
     const roleIds = user.Roles.map((role) => role.id);
 
-    // Validasi jenis_akun vs role, tapi pesan sama
     if (
       (jenis_akun === "penerima-beasiswa" && !roleIds.includes(1)) ||
       (jenis_akun === "instansi" && roleIds.includes(1))
@@ -45,13 +53,12 @@ exports.login = async (req, res) => {
       return failResponse(res, "User ID atau PIN salah", 200);
     }
 
-    // Ambil menu berdasarkan semua role user (id_role IN [...])
     const menusRaw = await Menu.findAll({
       include: [
         {
           model: RoleMenu,
           where: { id_role: { [Op.in]: roleIds } },
-          attributes: ["access"], // ambil access
+          attributes: ["access"],
         },
       ],
       order: [
@@ -61,7 +68,6 @@ exports.login = async (req, res) => {
       distinct: true,
     });
 
-    // Gabungkan akses per menu
     const menusWithAccess = menusRaw.map((menu) => {
       const accessSet = new Set();
       menu.RoleMenus.forEach((rm) => {
@@ -71,9 +77,8 @@ exports.login = async (req, res) => {
       });
       const access = [...accessSet].sort().join("");
 
-      // Buat object baru tanpa RoleMenus
       const menuJson = menu.toJSON();
-      delete menuJson.RoleMenus; // hapus properti RoleMenus
+      delete menuJson.RoleMenus;
 
       return {
         ...menuJson,
@@ -81,10 +86,8 @@ exports.login = async (req, res) => {
       };
     });
 
-    // Bikin tree dengan akses sudah disertakan
     const menus = buildMenuTree(menusWithAccess);
 
-    // Login
     const accessToken = jwt.sign(
       {
         id: user.id,
@@ -99,18 +102,23 @@ exports.login = async (req, res) => {
         iss: "palma",
       },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" }, // access token 15 menit
+      { expiresIn: "15m" },
     );
 
     const refreshToken = jwt.sign(
       { id: user.id, user_id: user.user_id },
       process.env.JWT_REFRESH_SECRET,
-      { expiresIn: "7d" }, // refresh token 7 hari
+      { expiresIn: "7d" },
     );
 
     await user.update({ refresh_token: refreshToken });
 
     const avatarFile = user.avatar ? user.avatar : "default.jpg";
+
+    let redirectPage = "/home";
+    if (jenis_akun === "instansi") {
+      redirectPage = "/home";
+    }
 
     return successResponse(res, "Login berhasil", {
       user: {
@@ -131,14 +139,12 @@ exports.login = async (req, res) => {
       accessToken,
       refreshToken,
       menus,
-      redirectPage: "/home",
+      redirectPage: redirectPage,
     });
   } catch (error) {
     return errorResponse(res, error.message);
   }
 };
-
-const captchaStore = {};
 
 exports.getCaptcha = (req, res) => {
   const a = Math.floor(Math.random() * 10);
@@ -192,38 +198,44 @@ exports.register = async (req, res) => {
       kode_prov,
       kode_kab,
       jenis_akun,
-      username, // input untuk non-beasiswa
-      password, // input untuk non-beasiswa
+      username,
+      password,
+      captchaId,
+      answer
     } = req.body;
 
-    // Cek email sudah ada atau belum
+    if (!captchaId || answer === undefined) {
+      return failResponse(res, "Silakan selesaikan hitungan captcha terlebih dahulu", 400);
+    }
+    if (!(captchaId in captchaStore) || captchaStore[captchaId] !== Number(answer)) {
+      if (captchaId in captchaStore) delete captchaStore[captchaId];
+      return failResponse(res, "Jawaban captcha salah atau kedaluwarsa", 400);
+    }
+    delete captchaStore[captchaId];
+
     const existingEmail = await User.findOne({ where: { email } });
     if (existingEmail) return failResponse(res, "Email sudah digunakan", 200);
 
-    // Cek no hp sudah ada atau belum
     const existingHP = await User.findOne({ where: { no_hp } });
     if (existingHP) return failResponse(res, "No. HP sudah digunakan", 200);
 
     let user_id, pin, hashedPin, is_active;
 
     if (jenis_akun === "beasiswa") {
-      // Generate otomatis untuk penerima beasiswa
       user_id = generateUserId(8);
       pin = generatePin(6);
       hashedPin = await argon2.hash(pin);
       is_active = 1;
     } else {
-      // Non-beasiswa pakai input user
       if (!username || !password) {
         return failResponse(res, "Username dan password wajib diisi", 200);
       }
       user_id = username;
       pin = password;
       hashedPin = await argon2.hash(pin);
-      is_active = 0; // Non-beasiswa otomatis inactive
+      is_active = 0;
     }
 
-    // Mapping role
     const roleMap = {
       beasiswa: 1,
       ditjenbun: 2,
@@ -234,7 +246,6 @@ exports.register = async (req, res) => {
     };
     const user_role = roleMap[jenis_akun] || 0;
 
-    // Helper untuk pecah string "id#nama"
     const parseField = (val) => {
       if (!val) return { id: null, label: null };
       if (val.includes("#")) {
@@ -252,7 +263,6 @@ exports.register = async (req, res) => {
 
     const fileSurat = req.file;
 
-    // Insert user baru
     const newUser = await User.create({
       nama_lengkap,
       email,
@@ -270,23 +280,58 @@ exports.register = async (req, res) => {
       kode_kab: kab.id,
       kab_kota: kab.label,
       is_active,
-      surat_penunjukan: fileSurat ? fileSurat.filename : null, // <-- simpan file
+      surat_penunjukan: fileSurat ? fileSurat.filename : null,
     });
 
-    // Tambahkan ke user role
     await UserRole.create({
       id_user: newUser.id,
       id_role: user_role,
     });
 
-    // Response
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      secure: process.env.SMTP_SECURE === "true",
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: `"${process.env.SMTP_FROM_NAME}" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: "Informasi Pendaftaran Akun Palma Beasiswa",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+          <h2 style="color: #2e7d32; text-align: center;">Pendaftaran Berhasil</h2>
+          <p>Halo <b>${nama_lengkap}</b>,</p>
+          <p>Selamat, pendaftaran akun Anda di Aplikasi Palma Beasiswa telah berhasil. Berikut adalah detail informasi login Anda:</p>
+          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><b>User ID / Username:</b> ${user_id}</p>
+            <p style="margin: 5px 0;"><b>PIN / Password:</b> ${pin}</p>
+          </div>
+          <p style="color: red; font-size: 13px;"><b>Penting:</b> Harap simpan informasi ini dengan baik. Jika Anda adalah penerima beasiswa, Anda diwajibkan untuk mengubah PIN ini setelah berhasil login.</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${process.env.BASE_URL || 'https://beasiswa.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
+          </div>
+          <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
+          <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
+        </div>
+      `,
+    };
+
+    transporter.sendMail(mailOptions).catch(err => {
+      console.error("Gagal mengirim email notifikasi akun baru:", err);
+    });
+
     if (jenis_akun === "beasiswa") {
-      return successResponse(res, "User berhasil dibuat", {
+      return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.", {
         user_id,
         pin,
       });
     } else {
-      return successResponse(res, "User berhasil dibuat");
+      return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.");
     }
   } catch (error) {
     return errorResponse(res, error.message);
@@ -345,7 +390,7 @@ exports.updateProfile = async (req, res) => {
       updateData.avatar = filename;
     }
 
-    // 🔐 JIKA USER MAU GANTI PIN
+
     if (pin) {
       if (!current_pin) {
         return errorResponse(res, "PIN sekarang wajib diisi", 400);
@@ -356,7 +401,7 @@ exports.updateProfile = async (req, res) => {
         return errorResponse(res, "PIN sekarang salah", 400);
       }
 
-      // 🔥 hash PIN baru
+      // hash PIN baru
       const hashedPin = await argon2.hash(pin);
 
       updateData.pin = hashedPin;
@@ -496,13 +541,13 @@ exports.forgotPin = async (req, res) => {
 
     // 1. Buat secret unik (menggunakan PIN saat ini)
     const secret = process.env.JWT_SECRET + user.pin;
-    
+
     // 2. Buat payload dan token (berlaku 15 menit)
     const payload = { email: user.email, id: user.id };
     const token = jwt.sign(payload, secret, { expiresIn: "15m" });
 
     // 3. Buat URL reset PIN (Sesuaikan port frontend Anda)
-    const frontendUrl = "https://beasiswa.dev-palma.my.id"; 
+    const frontendUrl = "https://beasiswa.dev-palma.my.id";
     const resetLink = `${frontendUrl}/reset-pin/${user.id}/${token}`;
 
     // 4. Setup Nodemailer Transporter menggunakan data dari config.env
@@ -574,12 +619,12 @@ exports.resetPin = async (req, res) => {
 
     // 4. Hash PIN baru dan simpan menggunakan argon2
     const hashedPin = await argon2.hash(String(new_pin));
-    
+
     await User.update(
-      { 
+      {
         pin: hashedPin,
-        telah_ganti_pin: "Y" 
-      }, 
+        telah_ganti_pin: "Y"
+      },
       { where: { id: user.id } }
     );
 
