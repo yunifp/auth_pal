@@ -376,7 +376,6 @@ exports.updateProfile = async (req, res) => {
     const filename = req.file ? req.file.filename : null;
     const { nama, current_pin, pin } = req.body;
 
-    // 🔍 Ambil user (termasuk pin untuk verifikasi)
     const user = await User.findByPk(decoded.id);
     if (!user) {
       return errorResponse(res, "User tidak ditemukan", 404);
@@ -410,7 +409,6 @@ exports.updateProfile = async (req, res) => {
 
     await User.update(updateData, { where: { id: decoded.id } });
 
-    // 🔄 Ambil ulang data (tanpa pin)
     const userRaw = await User.findByPk(decoded.id, {
       attributes: { exclude: ["pin"] },
     });
@@ -463,13 +461,11 @@ exports.refreshToken = async (req, res) => {
   try {
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
-    // 🔹 AMBIL DATA USER LENGKAP dari database
     const user = await User.findOne({
       where: { id: decoded.id },
       include: [{ model: Role, through: { attributes: [] } }],
     });
 
-    // 🔹 Validasi user & refresh token
     if (!user || user.refresh_token !== refreshToken) {
       return errorResponse(res, "Refresh token tidak valid", 401);
     }
@@ -478,10 +474,8 @@ exports.refreshToken = async (req, res) => {
       return errorResponse(res, "Akun tidak aktif", 401);
     }
 
-    // 🔹 Ambil role IDs
     const roleIds = user.Roles.map((role) => role.id);
 
-    // 🔹 Bikin access token baru dengan PAYLOAD LENGKAP (sama seperti login)
     const newAccessToken = jwt.sign(
       {
         id: user.id,
@@ -526,6 +520,7 @@ const buildMenuTree = (menus) => {
 
   return tree;
 };
+
 exports.forgotPin = async (req, res) => {
   try {
     const { email } = req.body;
@@ -570,7 +565,12 @@ exports.forgotPin = async (req, res) => {
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
           <h2 style="color: #2e7d32; text-align: center;">Reset PIN Anda</h2>
           <p>Halo <b>${user.nama_lengkap}</b>,</p>
-          <p>Kami menerima permintaan untuk melakukan reset PIN pada akun Anda. Silakan klik tombol di bawah ini untuk membuat PIN baru:</p>
+          <p>Kami menerima permintaan untuk melakukan reset PIN pada akun Anda. Berikut adalah detail informasi akun Anda:</p>
+          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><b>ID User:</b> ${user.id}</p>
+            <p style="margin: 5px 0;"><b>Username / User ID:</b> ${user.user_id}</p>
+          </div>
+          <p>Silakan klik tombol di bawah ini untuk membuat PIN baru:</p>
           <div style="text-align: center; margin: 30px 0;">
             <a href="${resetLink}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset PIN Sekarang</a>
           </div>

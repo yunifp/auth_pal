@@ -15,15 +15,30 @@ exports.getByPagination = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
     const search = req.query.search || "";
+    const roleFilter = req.query.role || ""; // Menangkap query role
 
-    const whereCondition = search
-      ? {
-        [Op.or]: [
-          { nama: { [Op.like]: `%${search}%` } },
-          { username: { [Op.like]: `%${search}%` } },
-        ],
-      }
-      : {};
+    const whereCondition = {};
+
+    // 1. Logika Search
+    if (search) {
+      whereCondition[Op.or] = [
+        { nama: { [Op.like]: `%${search}%` } },
+        { username: { [Op.like]: `%${search}%` } },
+      ];
+    }
+
+    // 2. Logika Filter by Role
+    if (roleFilter) {
+      // Cari ID user yang memiliki id_role tersebut
+      const userRoles = await UserRole.findAll({
+        where: { id_role: roleFilter },
+        attributes: ["id_user"],
+      });
+      const userIds = userRoles.map((ur) => ur.id_user);
+
+      // Gabungkan ke dalam whereCondition
+      whereCondition.id = { [Op.in]: userIds };
+    }
 
     const { count, rows } = await User.findAndCountAll({
       where: whereCondition,
@@ -37,7 +52,7 @@ exports.getByPagination = async (req, res) => {
           through: { attributes: [] },
         },
       ],
-      distinct: true, // penting agar count menghitung user unik
+      distinct: true, // penting agar count menghitung user uniks
     });
 
     const resultWithRoles = rows.map((user) => {
@@ -60,6 +75,7 @@ exports.getByPagination = async (req, res) => {
       totalPages: Math.ceil(count / limit),
     });
   } catch (error) {
+    console.error(error);
     return res.status(500).json(errorResponse("Internal Server Error"));
   }
 };
@@ -68,7 +84,6 @@ exports.createUser = async (req, res) => {
   try {
     const { id_role, username, ...userData } = req.body;
 
-    // Cek apakah username sudah digunakan
     const existing = await User.findOne({ where: { user_id: username } });
     if (existing) {
       return failResponse(res, "NIK/NIP sudah digunakan", 400);
