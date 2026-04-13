@@ -8,6 +8,8 @@ const argon2 = require("argon2");
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
 const { getFileUrl } = require("../../../common/middleware/upload_middleware");
+const { sequelize } = require("../../../core/db_config");
+const { generateUserId, generatePin } = require("../../../utils/stringFormatter");
 
 exports.getByPagination = async (req, res) => {
   try {
@@ -15,28 +17,24 @@ exports.getByPagination = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
     const search = req.query.search || "";
-    const roleFilter = req.query.role || ""; // Menangkap query role
+    const roleFilter = req.query.role || "";
 
     const whereCondition = {};
 
-    // 1. Logika Search
     if (search) {
       whereCondition[Op.or] = [
-        { nama: { [Op.like]: `%${search}%` } },
-        { username: { [Op.like]: `%${search}%` } },
+        { nama_lengkap: { [Op.like]: `%${search}%` } },
+        { user_id: { [Op.like]: `%${search}%` } },
       ];
     }
 
-    // 2. Logika Filter by Role
     if (roleFilter) {
-      // Cari ID user yang memiliki id_role tersebut
       const userRoles = await UserRole.findAll({
         where: { id_role: roleFilter },
         attributes: ["id_user"],
       });
       const userIds = userRoles.map((ur) => ur.id_user);
 
-      // Gabungkan ke dalam whereCondition
       whereCondition.id = { [Op.in]: userIds };
     }
 
@@ -52,7 +50,7 @@ exports.getByPagination = async (req, res) => {
           through: { attributes: [] },
         },
       ],
-      distinct: true, // penting agar count menghitung user uniks
+      distinct: true,
     });
 
     const resultWithRoles = rows.map((user) => {
@@ -75,8 +73,7 @@ exports.getByPagination = async (req, res) => {
       totalPages: Math.ceil(count / limit),
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -89,7 +86,6 @@ exports.createUser = async (req, res) => {
       return failResponse(res, "NIK/NIP sudah digunakan", 400);
     }
 
-    // Cek apakah ada file gambar yang diupload
     if (req.file) {
       userData.avatar = req.file.filename;
     }
@@ -108,8 +104,7 @@ exports.createUser = async (req, res) => {
 
     return successResponse(res, "User berhasil ditambahkan");
   } catch (error) {
-    console.error(error);
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -130,32 +125,24 @@ exports.getDetailById = async (req, res) => {
 
     if (!user) return failResponse(res, "Data tidak ditemukan", 200);
 
-    // gunakan user.avatar bukan userRaw.avatar
     const avatarFile = user.avatar ? user.avatar : "default.jpg";
 
-    // convert user ke plain object
     const userData = user.toJSON();
 
-    // override avatar url
     userData.avatar = getFileUrl(req, "profile", avatarFile);
 
-    // ambil role dari userData.Roles dan rename ke role
     const role = userData.Roles;
 
-    // hapus properti Roles agar tidak dobel
     delete userData.Roles;
 
-    // hasil akhir
     const result = {
       ...userData,
       role,
     };
 
-    console.log(result);
-
     return successResponse(res, "Data berhasil dimuat", result);
   } catch (error) {
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -164,12 +151,11 @@ exports.updateById = async (req, res) => {
     const { id } = req.params;
     const { id_role, username, ...userData } = req.body;
 
-    // Cek apakah username digunakan oleh user lain
     if (username) {
       const existing = await User.findOne({
         where: {
           user_id: username,
-          id: { [Op.ne]: id }, // selain user ini
+          id: { [Op.ne]: id },
         },
       });
 
@@ -178,7 +164,6 @@ exports.updateById = async (req, res) => {
       }
     }
 
-    // Cek apakah ada file gambar yang diupload
     if (req.file) {
       userData.avatar = req.file.filename;
     }
@@ -222,8 +207,7 @@ exports.updateById = async (req, res) => {
 
     return successResponse(res, "Data berhasil diperbarui", result);
   } catch (error) {
-    console.error(error);
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -231,12 +215,11 @@ exports.deleteById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Menghapus data berdasarkan id
     await User.destroy({ where: { id } });
 
     return successResponse(res, "Data berhasil dihapus");
   } catch (error) {
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -283,7 +266,7 @@ exports.exportExcel = async (req, res) => {
 
     await workbook.xlsx.write(res);
   } catch (error) {
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -308,18 +291,18 @@ exports.getOpPt = async (req, res) => {
       return failResponse(res, "Data tidak ditemukan", 200);
 
     const formattedUser = users.map((user) => {
-      const userData = user.toJSON(); // ✅ convert dulu
+      const userData = user.toJSON(); 
 
       const avatarFile = userData.avatar ? userData.avatar : "default.jpg";
 
       userData.avatar = getFileUrl(req, "profile", avatarFile);
 
-      return userData; // ✅ WAJIB return
+      return userData; 
     });
 
     return successResponse(res, "Data berhasil dimuat", formattedUser);
   } catch (error) {
-    return errorResponse("Internal Server Error");
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
@@ -344,22 +327,20 @@ exports.getVerifPt = async (req, res) => {
       return failResponse(res, "Data tidak ditemukan", 200);
 
     const formattedUser = users.map((user) => {
-      const userData = user.toJSON(); // convert dulu ke plain object
+      const userData = user.toJSON(); 
 
       const avatarFile = userData.avatar ? userData.avatar : "default.jpg";
       userData.avatar = getFileUrl(req, "profile", avatarFile);
 
-      return userData; // wajib return di map
+      return userData; 
     });
 
     return successResponse(res, "Data berhasil dimuat", formattedUser);
   } catch (error) {
-    console.log(error);
-    return errorResponse("Internal Server Error");
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
-// Tambahkan di user controller
 exports.getVerifikatorIds = async (req, res) => {
   try {
     const userRoles = await UserRole.findAll({
@@ -372,11 +353,10 @@ exports.getVerifikatorIds = async (req, res) => {
 
     return successResponse(res, "Data berhasil dimuat", ids);
   } catch (error) {
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
   }
 };
 
-// user controller auth service
 exports.getUsersByIds = async (req, res) => {
   try {
     const { ids } = req.query;
@@ -391,7 +371,108 @@ exports.getUsersByIds = async (req, res) => {
 
     return successResponse(res, "Data berhasil dimuat", users);
   } catch (error) {
-    console.error(error);
-    return res.status(500).json(errorResponse("Internal Server Error"));
+    return errorResponse(res, "Internal Server Error", 500);
+  }
+};
+
+exports.createOperatorPT = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const {
+      id_pt, 
+      nama_pt,
+      namaOperator, 
+      emailOperator, 
+      noTeleponOperator
+    } = req.body;
+
+    if (!id_pt) {
+      return failResponse(res, "ID Perguruan Tinggi (id_pt) wajib dikirim", 400);
+    }
+
+    const opUserId = generateUserId(8);
+    const opPin = generatePin(6);
+    const hashedOpPin = await argon2.hash(opPin);
+
+    const operator = await User.create({
+      nama_lengkap: namaOperator,
+      email: emailOperator,
+      no_hp: noTeleponOperator,
+      user_id: opUserId,
+      pin: hashedOpPin,
+      id_lembaga_pendidikan: id_pt,
+      lembaga_pendidikan: nama_pt,
+      is_active: 1
+    }, { transaction });
+    
+    await UserRole.create({ id_user: operator.id, id_role: 112 }, { transaction });
+
+    await transaction.commit();
+
+    return successResponse(res, "Akun Operator PT berhasil dibuat", {
+      operator: { user_id: opUserId, pin: opPin }
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    return errorResponse(res, "Internal Server Error saat membuat akun PT", 500);
+  }
+};
+
+exports.updateOperatorPT = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const { id_pt } = req.params;
+    const {
+      nama_pt,
+      namaOperator, 
+      emailOperator, 
+      noTeleponOperator
+    } = req.body;
+
+    const existingOp = await User.findOne({
+      where: { id_lembaga_pendidikan: id_pt },
+      include: [{ model: Role, where: { id: 112 }, through: { attributes: [] } }]
+    });
+
+    let newCredentials = null; 
+
+    if (existingOp) {
+      await User.update({
+        nama_lengkap: namaOperator,
+        email: emailOperator,
+        no_hp: noTeleponOperator,
+        lembaga_pendidikan: nama_pt
+      }, { where: { id: existingOp.id }, transaction });
+    } else if (namaOperator) {
+      const opUserId = generateUserId(8);
+      const opPin = generatePin(6);
+      const hashedOpPin = await argon2.hash(opPin);
+      
+      const newOp = await User.create({
+        nama_lengkap: namaOperator, email: emailOperator, no_hp: noTeleponOperator,
+        user_id: opUserId, pin: hashedOpPin, id_lembaga_pendidikan: id_pt,
+        lembaga_pendidikan: nama_pt, is_active: 1
+      }, { transaction });
+      
+      await UserRole.create({ id_user: newOp.id, id_role: 112 }, { transaction });
+
+      newCredentials = {
+        user_id: opUserId,
+        pin: opPin
+      };
+    }
+
+    await transaction.commit();
+
+    return successResponse(
+      res, 
+      "Akun Operator PT berhasil diupdate", 
+      newCredentials ? { operator: newCredentials } : null
+    );
+
+  } catch (error) {
+    await transaction.rollback();
+    return errorResponse(res, "Internal Server Error saat update akun PT", 500);
   }
 };

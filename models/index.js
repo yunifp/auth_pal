@@ -3,6 +3,7 @@ const RoleMenu = require("./RoleMenu");
 const Role = require("./Role");
 const User = require("./User");
 const UserRole = require("./UserRole");
+const EmailLog = require("./EmailLog");
 
 // Buat object models supaya gampang akses
 const models = {
@@ -11,6 +12,7 @@ const models = {
   Role,
   User,
   UserRole,
+  EmailLog
 };
 
 // Relasi RoleMenu ↔ Menu
@@ -20,6 +22,9 @@ Menu.hasMany(RoleMenu, { foreignKey: "id_menu" });
 // Relasi RoleMenu ↔ Role
 RoleMenu.belongsTo(Role, { foreignKey: "id_role" });
 Role.hasMany(RoleMenu, { foreignKey: "id_role" });
+
+User.hasMany(EmailLog, { foreignKey: "id_user" });
+EmailLog.belongsTo(User, { foreignKey: "id_user" });
 
 // Relasi User ↔ Role via UserRole (Many-to-Many)
 User.belongsToMany(Role, {

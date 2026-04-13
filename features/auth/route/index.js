@@ -10,7 +10,7 @@ const {
   logout,
   getCaptcha,
   verifyCaptcha,
-  forgotPin, 
+  forgotPin,
   resetPin
 } = require("../controller");
 const {
@@ -29,7 +29,6 @@ router.post("/refresh-token", refreshToken);
 router.post("/logout", logout);
 router.post("/forgot-pin", forgotPin);
 router.post("/reset-pin/:id/:token", resetPin);
-
 router.get("/captcha", getCaptcha);
 router.post("/verify-captcha", verifyCaptcha);
 

@@ -6,52 +6,47 @@ const {
 } = require("../../../common/response");
 const { Op } = require("sequelize");
 const { User, UserRole } = require("../../../models");
-const {
-  safeSplit,
-  generateUserId,
-  generatePin,
-} = require("../../../utils/stringFormatter");
+const { safeSplit } = require("../../../utils/stringFormatter");
 const argon2 = require("argon2");
 const { getFileUrl } = require("../../../common/middleware/upload_middleware");
 
 exports.getByPagination = async (req, res) => {
   try {
-    // Ambil parameter page dan limit dari query, default ke 1 dan 10
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
     const search = req.query.search || "";
+    
     const whereCondition = search
       ? {
-        [Op.or]: [{ nama_lengkap: { [Op.like]: `%${search}%` } }],
-      }
+          [Op.or]: [
+            { nama_lengkap: { [Op.like]: `%${search}%` } },
+            { user_id: { [Op.like]: `%${search}%` } }, // mencari berdasarkan username
+          ],
+        }
       : {};
 
-    // if (req.query.lpId) {
-    //   whereCondition.id_lembaga_pendidikan = req.query.lpId;
-    // }
-
-    // Ambil data role + total count
     const { count, rows } = await User.findAndCountAll({
-      where: whereCondition, // search nama, dll
+      where: whereCondition,
       include: [
         {
           model: Role,
           attributes: [],
+          // ID Role 3, 4, 5 disesuaikan dengan jenis akun dinas/instansi/lembaga
           where: {
             id: {
-              [Op.in]: [3, 4, 5],
+              [Op.in]: [3, 4, 5], 
             },
           },
           through: {
             attributes: [],
           },
-          required: true, // INNER JOIN
+          required: true,
         },
       ],
       limit,
       offset,
-      order: [["id", "ASC"]],
+      order: [["id", "DESC"]],
       distinct: true,
     });
 
@@ -76,47 +71,74 @@ exports.getByPagination = async (req, res) => {
       totalPages: Math.ceil(count / limit),
     });
   } catch (error) {
-    return errorResponse("Internal Server Error");
+    console.error(error);
+    return errorResponse(res, "Internal Server Error");
   }
 };
 
 exports.create = async (req, res) => {
   try {
-    const { jenis_akun, lembaga_pendidikan, nama, no_hp, email, is_active } =
-      req.body;
+    // Parameter disesuaikan dengan form di /daftar-instansi
+    const { 
+      jenis_akun, 
+      username, 
+      password, 
+      nama_lengkap, 
+      nama, 
+      no_hp, 
+      email, 
+      perguruan_tinggi, 
+      jenjang, 
+      provinsi, 
+      kabkota, 
+      is_active 
+    } = req.body;
 
-    const surat_penunjukan = req.file.filename;
+    const surat_penunjukan = req.file ? req.file.filename : null;
 
-    const [idLembagaPendidikan, namaLembagaPendidikan] =
-      safeSplit(lembaga_pendidikan);
+    // Menggunakan safeSplit karena Select di FE mengirimkan value gabungan (id#nama)
+    const [idPerguruanTinggi, namaPerguruanTinggi] = safeSplit(perguruan_tinggi);
+    const [idJenjang, namaJenjang] = safeSplit(jenjang);
+    const [kodeProv, namaProv] = safeSplit(provinsi);
+    const [kodeKab, namaKab] = safeSplit(kabkota);
 
-    const user_id = generateUserId(8);
-
-    const pinGenerated = generatePin(6);
-    const hashedPin = await argon2.hash("123123");
+    // Hash password (menggunakan kolom 'pin' di database)
+    let hashedPin = null;
+    if (password) {
+      hashedPin = await argon2.hash(password);
+    } else {
+      hashedPin = await argon2.hash("123456"); // Default password jika admin tidak mengisi
+    }
 
     const insertData = {
-      jenis_akun,
-      id_lembaga_pendidikan: idLembagaPendidikan,
-      lembaga_pendidikan: namaLembagaPendidikan,
-      nama_lengkap: nama,
-      no_hp,
-      email,
-      surat_penunjukan,
-      user_id,
+      user_id: username, // username dimasukkan ke kolom user_id
       pin: hashedPin,
-      is_active,
+      nama_lengkap: nama_lengkap || nama,
+      email,
+      no_hp,
+      id_perguruan_tinggi: idPerguruanTinggi,
+      perguruan_tinggi: namaPerguruanTinggi,
+      id_jenjang: idJenjang,
+      jenjang: namaJenjang,
+      kode_prov: kodeProv,
+      prov: namaProv,
+      kode_kab: kodeKab,
+      kab_kota: namaKab, // sesuai penamaan di DB
+      surat_penunjukan,
+      is_active: is_active !== undefined ? is_active : 1,
     };
 
     const user = await User.create(insertData);
 
-    const insertId = user.id;
+    // Insert ke tabel relasi UserRole untuk jenis_akun
+    if (jenis_akun) {
+      await UserRole.create({ id_user: user.id, id_role: jenis_akun });
+    }
 
-    await UserRole.create({ id_user: insertId, id_role: jenis_akun });
-
-    return successResponse(res, "Role berhasil ditambahkan");
+    return successResponse(res, "Akun instansi berhasil ditambahkan");
   } catch (error) {
-    return errorResponse("Internal Server Error");
+    console.error(error);
+    return errorResponse(res, "Internal Server Error");
   }
 };
 
@@ -129,11 +151,17 @@ exports.getDetailById = async (req, res) => {
       attributes: [
         "id",
         "user_id",
-        "id_lembaga_pendidikan",
-        "lembaga_pendidikan",
         "nama_lengkap",
-        "no_hp",
         "email",
+        "no_hp",
+        "id_perguruan_tinggi",
+        "perguruan_tinggi",
+        "id_jenjang",
+        "jenjang",
+        "kode_prov",
+        "prov",
+        "kode_kab",
+        "kab_kota",
         "surat_penunjukan",
         "is_active",
       ],
@@ -141,20 +169,41 @@ exports.getDetailById = async (req, res) => {
 
     if (!user) return failResponse(res, "Data tidak ditemukan", 200);
 
-    // Konversi ke plain object
     const userData = user.get({ plain: true });
 
-    userData.surat_penunjukan = getFileUrl(
-      req,
-      "surat_penunjukan",
-      userData.surat_penunjukan,
-    );
+    if (userData.surat_penunjukan) {
+      userData.surat_penunjukan = getFileUrl(
+        req,
+        "surat_penunjukan",
+        userData.surat_penunjukan,
+      );
+    }
 
     const role = await UserRole.findOne({
       where: { id_user: id },
     });
 
-    userData.jenis_akun = role?.id_role || null;
+    // Sesuaikan variabel balikan agar kompatibel dengan state form Frontend
+    userData.jenis_akun = role?.id_role ? String(role.id_role) : null;
+    userData.username = userData.user_id; 
+    userData.nama = userData.nama_lengkap;
+
+    // Format id#nama agar komponen CustSearchableSelect bisa membaca defaultValue dengan benar
+    userData.perguruan_tinggi = userData.id_perguruan_tinggi && userData.perguruan_tinggi
+      ? `${userData.id_perguruan_tinggi}#${userData.perguruan_tinggi}`
+      : null;
+      
+    userData.jenjang = userData.id_jenjang && userData.jenjang
+      ? `${userData.id_jenjang}#${userData.jenjang}`
+      : null;
+      
+    userData.provinsi = userData.kode_prov && userData.prov
+      ? `${userData.kode_prov}#${userData.prov}`
+      : null;
+      
+    userData.kabkota = userData.kode_kab && userData.kab_kota
+      ? `${userData.kode_kab}#${userData.kab_kota}`
+      : null;
 
     return successResponse(res, "Data berhasil dimuat", userData);
   } catch (error) {
@@ -165,55 +214,76 @@ exports.getDetailById = async (req, res) => {
 
 exports.updateById = async (req, res) => {
   try {
-    const { jenis_akun, lembaga_pendidikan, nama, no_hp, email, is_active } =
-      req.body;
-
     const { id } = req.params;
+    const { 
+      jenis_akun, 
+      username, 
+      password, 
+      nama_lengkap, 
+      nama, 
+      no_hp, 
+      email, 
+      perguruan_tinggi, 
+      jenjang, 
+      provinsi, 
+      kabkota, 
+      is_active 
+    } = req.body;
 
-    const surat_penunjukan = req.file?.filename; // optional, jika ada file
+    const surat_penunjukan = req.file?.filename; 
 
-    const [idLembagaPendidikan, namaLembagaPendidikan] =
-      safeSplit(lembaga_pendidikan);
+    const [idPerguruanTinggi, namaPerguruanTinggi] = safeSplit(perguruan_tinggi);
+    const [idJenjang, namaJenjang] = safeSplit(jenjang);
+    const [kodeProv, namaProv] = safeSplit(provinsi);
+    const [kodeKab, namaKab] = safeSplit(kabkota);
 
     const updateData = {
-      jenis_akun,
-      id_lembaga_pendidikan: idLembagaPendidikan,
-      lembaga_pendidikan: namaLembagaPendidikan,
-      nama_lengkap: nama,
+      user_id: username,
+      nama_lengkap: nama_lengkap || nama,
       no_hp,
       email,
+      id_perguruan_tinggi: idPerguruanTinggi || null,
+      perguruan_tinggi: namaPerguruanTinggi || null,
+      id_jenjang: idJenjang || null,
+      jenjang: namaJenjang || null,
+      kode_prov: kodeProv || null,
+      prov: namaProv || null,
+      kode_kab: kodeKab || null,
+      kab_kota: namaKab || null,
       is_active,
     };
+
+    if (password) {
+      updateData.pin = await argon2.hash(password);
+    }
 
     if (surat_penunjukan) {
       updateData.surat_penunjukan = surat_penunjukan;
     }
 
-    // Update user
     await User.update(updateData, { where: { id } });
 
-    // Hapus role lama dulu
-    // await UserRole.destroy({ where: { id_user: id } });
-
-    // Tambahkan role baru
-    // await UserRole.create({ id_user: id, id_role: jenis_akun });
+    if (jenis_akun) {
+      await UserRole.destroy({ where: { id_user: id } });
+      await UserRole.create({ id_user: id, id_role: jenis_akun });
+    }
 
     return successResponse(res, "Data dan role berhasil diperbarui");
   } catch (error) {
     console.error(error);
-    return errorResponse("Internal Server Error");
+    return errorResponse(res, "Internal Server Error");
   }
 };
 
 exports.deleteById = async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Menghapus data berdasarkan id
+    await UserRole.destroy({ where: { id_user: id } });
     await User.destroy({ where: { id } });
 
     return successResponse(res, "Data berhasil dihapus");
   } catch (error) {
-    return errorResponse("Internal Server Error");
+    console.error(error);
+    return errorResponse(res, "Internal Server Error");
   }
 };

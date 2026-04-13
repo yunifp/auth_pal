@@ -1,4 +1,4 @@
-const { RoleMenu, Menu, User, Role, UserRole } = require("../../../models");
+const { RoleMenu, Menu, User, Role, UserRole, EmailLog } = require("../../../models"); 
 const {
   successResponse,
   failResponse,
@@ -298,32 +298,65 @@ exports.register = async (req, res) => {
       },
     });
 
+    // Simpan konten HTML ke variabel agar bisa disimpan ke database
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+        <h2 style="color: #2e7d32; text-align: center;">Pendaftaran Berhasil</h2>
+        <p>Halo <b>${nama_lengkap}</b>,</p>
+        <p>Selamat, pendaftaran akun Anda di Aplikasi Palma Beasiswa telah berhasil. Berikut adalah detail informasi login Anda:</p>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+          <p style="margin: 5px 0;"><b>User ID / Username:</b> ${user_id}</p>
+          <p style="margin: 5px 0;"><b>PIN / Password:</b> ${pin}</p>
+        </div>
+        <p style="color: red; font-size: 13px;"><b>Penting:</b> Harap simpan informasi ini dengan baik. Jika Anda adalah penerima beasiswa, Anda diwajibkan untuk mengubah PIN ini setelah berhasil login.</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${process.env.BASE_URL || 'https://beasiswa.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
+        <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
+      </div>
+    `;
+
     const mailOptions = {
       from: `"${process.env.SMTP_FROM_NAME}" <${process.env.SMTP_USER}>`,
       to: email,
       subject: "Informasi Pendaftaran Akun Palma Beasiswa",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-          <h2 style="color: #2e7d32; text-align: center;">Pendaftaran Berhasil</h2>
-          <p>Halo <b>${nama_lengkap}</b>,</p>
-          <p>Selamat, pendaftaran akun Anda di Aplikasi Palma Beasiswa telah berhasil. Berikut adalah detail informasi login Anda:</p>
-          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p style="margin: 5px 0;"><b>User ID / Username:</b> ${user_id}</p>
-            <p style="margin: 5px 0;"><b>PIN / Password:</b> ${pin}</p>
-          </div>
-          <p style="color: red; font-size: 13px;"><b>Penting:</b> Harap simpan informasi ini dengan baik. Jika Anda adalah penerima beasiswa, Anda diwajibkan untuk mengubah PIN ini setelah berhasil login.</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${process.env.BASE_URL || 'https://beasiswa.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
-          </div>
-          <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
-          <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
-        </div>
-      `,
+      html: htmlContent,
     };
 
-    transporter.sendMail(mailOptions).catch(err => {
-      console.error("Gagal mengirim email notifikasi akun baru:", err);
-    });
+    // 1. KITA SIMPAN LOG DULU SEBAGAI "PENDING" SEBELUM MENGIRIM EMAIL
+    let emailLog;
+    try {
+      emailLog = await EmailLog.create({
+        id_user: newUser.id,
+        email_to: email,
+        subject: mailOptions.subject,
+        body_html: htmlContent,
+        status: "pending"
+      });
+      console.log("Log email berhasil dibuat dengan status PENDING");
+    } catch (logErr) {
+      console.error("GAGAL MEMBUAT LOG EMAIL DI DATABASE:", logErr.message);
+      // Jika ini error, berarti masalahnya ada di struktur tabel / database
+    }
+
+    // 2. KEMUDIAN KITA COBA KIRIM EMAILNYA
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log("Email berhasil dikirim ke SMTP");
+      
+      // Jika sukses, update log menjadi "sent"
+      if (emailLog) {
+        await emailLog.update({ status: "sent" });
+      }
+    } catch (sendErr) {
+      console.error("GAGAL MENGIRIM EMAIL VIA SMTP:", sendErr.message);
+      
+      // Jika gagal kirim, update log menjadi "failed"
+      if (emailLog) {
+        await emailLog.update({ status: "failed" });
+      }
+    }
 
     if (jenis_akun === "beasiswa") {
       return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.", {
@@ -334,6 +367,8 @@ exports.register = async (req, res) => {
       return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.");
     }
   } catch (error) {
+    // 3. TAMBAHKAN CONSOLE.LOG INI UNTUK MELIHAT ERROR UTAMA DI TERMINAL
+    console.error("ERROR PADA PROSES REGISTER KESELURUHAN:", error);
     return errorResponse(res, error.message);
   }
 };
