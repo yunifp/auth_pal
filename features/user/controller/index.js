@@ -405,7 +405,7 @@ exports.createOperatorPT = async (req, res) => {
       is_active: 1
     }, { transaction });
     
-    await UserRole.create({ id_user: operator.id, id_role: 112 }, { transaction });
+    await UserRole.create({ id_user: operator.id, id_role: 111 }, { transaction });
 
     await transaction.commit();
 
@@ -432,9 +432,11 @@ exports.updateOperatorPT = async (req, res) => {
 
     const existingOp = await User.findOne({
       where: { id_lembaga_pendidikan: id_pt },
-      include: [{ model: Role, where: { id: 112 }, through: { attributes: [] } }]
+      include: [{ model: Role, where: { id: 111 }, through: { attributes: [] } }]
     });
 
+
+    
     let newCredentials = null; 
 
     if (existingOp) {
@@ -455,7 +457,7 @@ exports.updateOperatorPT = async (req, res) => {
         lembaga_pendidikan: nama_pt, is_active: 1
       }, { transaction });
       
-      await UserRole.create({ id_user: newOp.id, id_role: 112 }, { transaction });
+      await UserRole.create({ id_user: newOp.id, id_role: 111 }, { transaction });
 
       newCredentials = {
         user_id: opUserId,
