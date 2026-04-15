@@ -79,7 +79,7 @@ exports.getByPagination = async (req, res) => {
 
 exports.createUser = async (req, res) => {
   try {
-    const { id_role, username, ...userData } = req.body;
+    const { id_role, username, id_lembaga_pendidikan, lembaga_pendidikan, ...userData } = req.body;
 
     const existing = await User.findOne({ where: { user_id: username } });
     if (existing) {
@@ -96,6 +96,8 @@ exports.createUser = async (req, res) => {
       nama_lengkap: userData.nama,
       user_id: username,
       pin: hashedPassword,
+      id_lembaga_pendidikan: id_lembaga_pendidikan || null,
+      lembaga_pendidikan: lembaga_pendidikan || null,
     });
 
     if (Array.isArray(id_role) && id_role.length > 0) {
@@ -149,7 +151,7 @@ exports.getDetailById = async (req, res) => {
 exports.updateById = async (req, res) => {
   try {
     const { id } = req.params;
-    const { id_role, username, ...userData } = req.body;
+    const { id_role, username, id_lembaga_pendidikan, lembaga_pendidikan, ...userData } = req.body;
 
     if (username) {
       const existing = await User.findOne({
@@ -168,10 +170,15 @@ exports.updateById = async (req, res) => {
       userData.avatar = req.file.filename;
     }
 
-    const [affectedRows] = await User.update(
-      { ...userData, user_id: username },
-      { where: { id } },
-    );
+    const updatePayload = {
+      ...userData,
+      user_id: username,
+    };
+
+    if (id_lembaga_pendidikan !== undefined) updatePayload.id_lembaga_pendidikan = id_lembaga_pendidikan;
+    if (lembaga_pendidikan !== undefined) updatePayload.lembaga_pendidikan = lembaga_pendidikan;
+
+    const [affectedRows] = await User.update(updatePayload, { where: { id } });
 
     if (affectedRows === 0) {
       return failResponse(res, "Data tidak ditemukan", 404);
@@ -291,13 +298,13 @@ exports.getOpPt = async (req, res) => {
       return failResponse(res, "Data tidak ditemukan", 200);
 
     const formattedUser = users.map((user) => {
-      const userData = user.toJSON(); 
+      const userData = user.toJSON();
 
       const avatarFile = userData.avatar ? userData.avatar : "default.jpg";
 
       userData.avatar = getFileUrl(req, "profile", avatarFile);
 
-      return userData; 
+      return userData;
     });
 
     return successResponse(res, "Data berhasil dimuat", formattedUser);
@@ -325,14 +332,13 @@ exports.getVerifPt = async (req, res) => {
 
     if (!users || users.length === 0)
       return failResponse(res, "Data tidak ditemukan", 200);
-
     const formattedUser = users.map((user) => {
-      const userData = user.toJSON(); 
+      const userData = user.toJSON();
 
       const avatarFile = userData.avatar ? userData.avatar : "default.jpg";
       userData.avatar = getFileUrl(req, "profile", avatarFile);
 
-      return userData; 
+      return userData;
     });
 
     return successResponse(res, "Data berhasil dimuat", formattedUser);
@@ -344,7 +350,7 @@ exports.getVerifPt = async (req, res) => {
 exports.getVerifikatorIds = async (req, res) => {
   try {
     const userRoles = await UserRole.findAll({
-      where: { id_role: 15 },
+      where: { id_role: 15, is_active: 1 },
       attributes: ["id_user"],
       order: [["id_user", "ASC"]],
     });
@@ -379,10 +385,10 @@ exports.createOperatorPT = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
     const {
-      id_pt, 
+      id_pt,
       nama_pt,
-      namaOperator, 
-      emailOperator, 
+      namaOperator,
+      emailOperator,
       noTeleponOperator
     } = req.body;
 
@@ -404,7 +410,7 @@ exports.createOperatorPT = async (req, res) => {
       lembaga_pendidikan: nama_pt,
       is_active: 1
     }, { transaction });
-    
+
     await UserRole.create({ id_user: operator.id, id_role: 111 }, { transaction });
 
     await transaction.commit();
@@ -425,8 +431,8 @@ exports.updateOperatorPT = async (req, res) => {
     const { id_pt } = req.params;
     const {
       nama_pt,
-      namaOperator, 
-      emailOperator, 
+      namaOperator,
+      emailOperator,
       noTeleponOperator
     } = req.body;
 
@@ -435,8 +441,6 @@ exports.updateOperatorPT = async (req, res) => {
       include: [{ model: Role, where: { id: 111 }, through: { attributes: [] } }]
     });
 
-
-    
     let newCredentials = null; 
 
     if (existingOp) {
@@ -450,13 +454,13 @@ exports.updateOperatorPT = async (req, res) => {
       const opUserId = generateUserId(8);
       const opPin = generatePin(6);
       const hashedOpPin = await argon2.hash(opPin);
-      
+
       const newOp = await User.create({
         nama_lengkap: namaOperator, email: emailOperator, no_hp: noTeleponOperator,
         user_id: opUserId, pin: hashedOpPin, id_lembaga_pendidikan: id_pt,
         lembaga_pendidikan: nama_pt, is_active: 1
       }, { transaction });
-      
+
       await UserRole.create({ id_user: newOp.id, id_role: 111 }, { transaction });
 
       newCredentials = {
@@ -468,8 +472,8 @@ exports.updateOperatorPT = async (req, res) => {
     await transaction.commit();
 
     return successResponse(
-      res, 
-      "Akun Operator PT berhasil diupdate", 
+      res,
+      "Akun Operator PT berhasil diupdate",
       newCredentials ? { operator: newCredentials } : null
     );
 
