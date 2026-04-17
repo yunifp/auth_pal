@@ -14,7 +14,9 @@ const {
   generatePin,
 } = require("../../../utils/stringFormatter");
 const { v4: uuidv4 } = require("uuid");
-const nodemailer = require("nodemailer");
+
+// --- IMPORT HELPER NOTIFIKASI ---
+const { sendNotificationToQueue } = require("../../../utils/notification");
 
 const captchaStore = {};
 
@@ -288,17 +290,7 @@ exports.register = async (req, res) => {
       id_role: user_role,
     });
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === "true",
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    // Simpan konten HTML ke variabel agar bisa disimpan ke database
+    // Simpan konten HTML ke variabel agar bisa dikirim
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
         <h2 style="color: #2e7d32; text-align: center;">Pendaftaran Berhasil</h2>
@@ -317,46 +309,8 @@ exports.register = async (req, res) => {
       </div>
     `;
 
-    const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME}" <${process.env.SMTP_USER}>`,
-      to: email,
-      subject: "Informasi Pendaftaran Akun Palma Beasiswa",
-      html: htmlContent,
-    };
-
-    // 1. KITA SIMPAN LOG DULU SEBAGAI "PENDING" SEBELUM MENGIRIM EMAIL
-    let emailLog;
-    try {
-      emailLog = await EmailLog.create({
-        id_user: newUser.id,
-        email_to: email,
-        subject: mailOptions.subject,
-        body_html: htmlContent,
-        status: "pending"
-      });
-      console.log("Log email berhasil dibuat dengan status PENDING");
-    } catch (logErr) {
-      console.error("GAGAL MEMBUAT LOG EMAIL DI DATABASE:", logErr.message);
-      // Jika ini error, berarti masalahnya ada di struktur tabel / database
-    }
-
-    // 2. KEMUDIAN KITA COBA KIRIM EMAILNYA
-    try {
-      await transporter.sendMail(mailOptions);
-      console.log("Email berhasil dikirim ke SMTP");
-      
-      // Jika sukses, update log menjadi "sent"
-      if (emailLog) {
-        await emailLog.update({ status: "sent" });
-      }
-    } catch (sendErr) {
-      console.error("GAGAL MENGIRIM EMAIL VIA SMTP:", sendErr.message);
-      
-      // Jika gagal kirim, update log menjadi "failed"
-      if (emailLog) {
-        await emailLog.update({ status: "failed" });
-      }
-    }
+    // --- GUNAKAN SERVICE NOTIFIKASI DISINI ---
+    sendNotificationToQueue("auth-create-account", email, htmlContent);
 
     if (jenis_akun === "beasiswa") {
       return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.", {
@@ -367,7 +321,6 @@ exports.register = async (req, res) => {
       return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.");
     }
   } catch (error) {
-    // 3. TAMBAHKAN CONSOLE.LOG INI UNTUK MELIHAT ERROR UTAMA DI TERMINAL
     console.error("ERROR PADA PROSES REGISTER KESELURUHAN:", error);
     return errorResponse(res, error.message);
   }
@@ -580,45 +533,30 @@ exports.forgotPin = async (req, res) => {
     const frontendUrl = "https://beasiswa.dev-palma.my.id";
     const resetLink = `${frontendUrl}/reset-pin/${user.id}/${token}`;
 
-    // 4. Setup Nodemailer Transporter menggunakan data dari config.env
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === "true", // true untuk port 465
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-
-    // 5. Desain Email dan Kirim
-    const mailOptions = {
-      from: `"${process.env.SMTP_FROM_NAME}" <${process.env.SMTP_USER}>`,
-      to: user.email,
-      subject: "Permintaan Reset PIN - Aplikasi Palma",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-          <h2 style="color: #2e7d32; text-align: center;">Reset PIN Anda</h2>
-          <p>Halo <b>${user.nama_lengkap}</b>,</p>
-          <p>Kami menerima permintaan untuk melakukan reset PIN pada akun Anda. Berikut adalah detail informasi akun Anda:</p>
-          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p style="margin: 5px 0;"><b>ID User:</b> ${user.id}</p>
-            <p style="margin: 5px 0;"><b>Username / User ID:</b> ${user.user_id}</p>
-          </div>
-          <p>Silakan klik tombol di bawah ini untuk membuat PIN baru:</p>
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${resetLink}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset PIN Sekarang</a>
-          </div>
-          <p>Atau Anda dapat menyalin tautan berikut ke browser Anda:</p>
-          <p style="word-break: break-all; color: #555;"><i>${resetLink}</i></p>
-          <p style="color: red; font-size: 12px;">*Tautan ini hanya berlaku selama 15 menit. Jika Anda tidak merasa meminta reset PIN, abaikan email ini.</p>
-          <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
-          <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
+    // 4. Desain Email dan Kirim menggunakan Service Notifikasi
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+        <h2 style="color: #2e7d32; text-align: center;">Reset PIN Anda</h2>
+        <p>Halo <b>${user.nama_lengkap}</b>,</p>
+        <p>Kami menerima permintaan untuk melakukan reset PIN pada akun Anda. Berikut adalah detail informasi akun Anda:</p>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
+          <p style="margin: 5px 0;"><b>ID User:</b> ${user.id}</p>
+          <p style="margin: 5px 0;"><b>Username / User ID:</b> ${user.user_id}</p>
         </div>
-      `,
-    };
+        <p>Silakan klik tombol di bawah ini untuk membuat PIN baru:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset PIN Sekarang</a>
+        </div>
+        <p>Atau Anda dapat menyalin tautan berikut ke browser Anda:</p>
+        <p style="word-break: break-all; color: #555;"><i>${resetLink}</i></p>
+        <p style="color: red; font-size: 12px;">*Tautan ini hanya berlaku selama 15 menit. Jika Anda tidak merasa meminta reset PIN, abaikan email ini.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
+        <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
+      </div>
+    `;
 
-    await transporter.sendMail(mailOptions);
+    // --- GUNAKAN SERVICE NOTIFIKASI DISINI ---
+    sendNotificationToQueue("auth-forgot-password", user.email, htmlContent);
 
     return successResponse(res, "Link reset PIN telah berhasil dikirim ke email Anda");
   } catch (error) {
