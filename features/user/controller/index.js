@@ -20,7 +20,6 @@ exports.getByPagination = async (req, res) => {
     const roleFilter = req.query.role || "";
 
     const whereCondition = {};
-
     if (search) {
       whereCondition[Op.or] = [
         { nama_lengkap: { [Op.like]: `%${search}%` } },
@@ -350,7 +349,7 @@ exports.getVerifPt = async (req, res) => {
 exports.getVerifikatorIds = async (req, res) => {
   try {
     const userRoles = await UserRole.findAll({
-      where: { id_role: 15, is_active: 1 },
+      where: { id_role: 15 },
       attributes: ["id_user"],
       order: [["id_user", "ASC"]],
     });
@@ -441,7 +440,7 @@ exports.updateOperatorPT = async (req, res) => {
       include: [{ model: Role, where: { id: 111 }, through: { attributes: [] } }]
     });
 
-    let newCredentials = null; 
+    let newCredentials = null;
 
     if (existingOp) {
       await User.update({

@@ -1,4 +1,4 @@
-const { RoleMenu, Menu, User, Role, UserRole, EmailLog } = require("../../../models"); 
+const { RoleMenu, Menu, User, Role, UserRole, EmailLog } = require("../../../models");
 const {
   successResponse,
   failResponse,
@@ -15,10 +15,10 @@ const {
 } = require("../../../utils/stringFormatter");
 const { v4: uuidv4 } = require("uuid");
 
-// --- IMPORT HELPER NOTIFIKASI ---
 const { sendNotificationToQueue } = require("../../../utils/notification");
 
 const captchaStore = {};
+const processingEmails = new Set();
 
 exports.login = async (req, res) => {
   const { user_id, pin, jenis_akun, captchaId, answer } = req.body;
@@ -27,7 +27,7 @@ exports.login = async (req, res) => {
     return failResponse(res, "Silakan selesaikan hitungan captcha terlebih dahulu", 400);
   }
   if (!(captchaId in captchaStore) || captchaStore[captchaId] !== Number(answer)) {
-    if (captchaId in captchaStore) delete captchaStore[captchaId]; // Hapus jika salah agar tidak bisa di-bruteforce
+    if (captchaId in captchaStore) delete captchaStore[captchaId];
     return failResponse(res, "Jawaban captcha salah atau kedaluwarsa", 400);
   }
   delete captchaStore[captchaId];
@@ -189,23 +189,27 @@ exports.verifyCaptcha = (req, res) => {
 };
 
 exports.register = async (req, res) => {
-  try {
-    const {
-      nama_lengkap,
-      email,
-      no_hp,
-      id_perguruan_tinggi,
-      id_jenjang,
-      id_program_studi,
-      kode_prov,
-      kode_kab,
-      jenis_akun,
-      username,
-      password,
-      captchaId,
-      answer
-    } = req.body;
+  const {
+    nama_lengkap,
+    email,
+    no_hp,
+    id_perguruan_tinggi,
+    id_jenjang,
+    id_program_studi,
+    kode_prov,
+    kode_kab,
+    jenis_akun,
+    username,
+    password,
+    captchaId,
+    answer
+  } = req.body;
 
+  if (email && processingEmails.has(email)) {
+    return failResponse(res, "Pendaftaran Anda sedang diproses, harap tunggu sebentar.", 429);
+  }
+
+  try {
     if (!captchaId || answer === undefined) {
       return failResponse(res, "Silakan selesaikan hitungan captcha terlebih dahulu", 400);
     }
@@ -214,6 +218,8 @@ exports.register = async (req, res) => {
       return failResponse(res, "Jawaban captcha salah atau kedaluwarsa", 400);
     }
     delete captchaStore[captchaId];
+
+    if (email) processingEmails.add(email);
 
     const existingEmail = await User.findOne({ where: { email } });
     if (existingEmail) return failResponse(res, "Email sudah digunakan", 200);
@@ -290,7 +296,6 @@ exports.register = async (req, res) => {
       id_role: user_role,
     });
 
-    // Simpan konten HTML ke variabel agar bisa dikirim
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
         <h2 style="color: #2e7d32; text-align: center;">Pendaftaran Berhasil</h2>
@@ -309,7 +314,6 @@ exports.register = async (req, res) => {
       </div>
     `;
 
-    // --- GUNAKAN SERVICE NOTIFIKASI DISINI ---
     sendNotificationToQueue("auth-create-account", email, htmlContent);
 
     if (jenis_akun === "beasiswa") {
@@ -321,8 +325,9 @@ exports.register = async (req, res) => {
       return successResponse(res, "User berhasil dibuat. Detail login telah dikirim ke Email Anda.");
     }
   } catch (error) {
-    console.error("ERROR PADA PROSES REGISTER KESELURUHAN:", error);
     return errorResponse(res, error.message);
+  } finally {
+    if (email) processingEmails.delete(email);
   }
 };
 
@@ -377,7 +382,6 @@ exports.updateProfile = async (req, res) => {
       updateData.avatar = filename;
     }
 
-
     if (pin) {
       if (!current_pin) {
         return errorResponse(res, "PIN sekarang wajib diisi", 400);
@@ -388,7 +392,6 @@ exports.updateProfile = async (req, res) => {
         return errorResponse(res, "PIN sekarang salah", 400);
       }
 
-      // hash PIN baru
       const hashedPin = await argon2.hash(pin);
 
       updateData.pin = hashedPin;
@@ -413,7 +416,6 @@ exports.updateProfile = async (req, res) => {
 
     return successResponse(res, "Profil berhasil diperbarui", responseUser);
   } catch (error) {
-    console.error(error);
     return errorResponse(res, error.message);
   }
 };
@@ -510,30 +512,31 @@ const buildMenuTree = (menus) => {
 };
 
 exports.forgotPin = async (req, res) => {
-  try {
-    const { email } = req.body;
+  const { email } = req.body;
 
-    if (!email) {
-      return failResponse(res, "Email wajib diisi", 400);
-    }
+  if (!email) {
+    return failResponse(res, "Email wajib diisi", 400);
+  }
+
+  if (processingEmails.has(email)) {
+    return failResponse(res, "Permintaan reset PIN sedang diproses, harap tunggu sebentar.", 429);
+  }
+
+  try {
+    processingEmails.add(email);
 
     const user = await User.findOne({ where: { email } });
     if (!user) {
       return failResponse(res, "Email tidak terdaftar di sistem kami", 404);
     }
 
-    // 1. Buat secret unik (menggunakan PIN saat ini)
     const secret = process.env.JWT_SECRET + user.pin;
-
-    // 2. Buat payload dan token (berlaku 15 menit)
     const payload = { email: user.email, id: user.id };
-    const token = jwt.sign(payload, secret, { expiresIn: "15m" });
+    const token = jwt.sign(payload, secret);
 
-    // 3. Buat URL reset PIN (Sesuaikan port frontend Anda)
     const frontendUrl = "https://beasiswa.dev-palma.my.id";
     const resetLink = `${frontendUrl}/reset-pin/${user.id}/${token}`;
 
-    // 4. Desain Email dan Kirim menggunakan Service Notifikasi
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
         <h2 style="color: #2e7d32; text-align: center;">Reset PIN Anda</h2>
@@ -555,13 +558,13 @@ exports.forgotPin = async (req, res) => {
       </div>
     `;
 
-    // --- GUNAKAN SERVICE NOTIFIKASI DISINI ---
     sendNotificationToQueue("auth-forgot-password", user.email, htmlContent);
 
     return successResponse(res, "Link reset PIN telah berhasil dikirim ke email Anda");
   } catch (error) {
-    console.error("ERROR FORGOT PIN:", error);
     return errorResponse(res, "Gagal mengirim email. Pastikan konfigurasi SMTP benar.");
+  } finally {
+    processingEmails.delete(email);
   }
 };
 
@@ -574,23 +577,19 @@ exports.resetPin = async (req, res) => {
       return failResponse(res, "Data tidak lengkap", 400);
     }
 
-    // 1. Cari user
     const user = await User.findByPk(id);
     if (!user) {
       return failResponse(res, "User tidak ditemukan", 404);
     }
 
-    // 2. Buat secret unik yang sama dengan saat token dibuat
     const secret = process.env.JWT_SECRET + user.pin;
 
-    // 3. Verifikasi token
     try {
       jwt.verify(token, secret);
     } catch (err) {
       return failResponse(res, "Link reset PIN tidak valid atau sudah kedaluwarsa", 400);
     }
 
-    // 4. Hash PIN baru dan simpan menggunakan argon2
     const hashedPin = await argon2.hash(String(new_pin));
 
     await User.update(
@@ -603,7 +602,6 @@ exports.resetPin = async (req, res) => {
 
     return successResponse(res, "PIN berhasil direset. Silakan login menggunakan PIN baru Anda.");
   } catch (error) {
-    console.error("ERROR RESET PIN:", error);
     return errorResponse(res, "Internal Server Error");
   }
 };
