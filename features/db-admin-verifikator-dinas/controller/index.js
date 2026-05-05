@@ -21,7 +21,7 @@ exports.getByPagination = async (req, res) => {
       ? {
           [Op.or]: [
             { nama_lengkap: { [Op.like]: `%${search}%` } },
-            { user_id: { [Op.like]: `%${search}%` } }, // mencari berdasarkan username
+            { user_id: { [Op.like]: `%${search}%` } },
           ],
         }
       : {};
@@ -32,7 +32,6 @@ exports.getByPagination = async (req, res) => {
         {
           model: Role,
           attributes: [],
-          // ID Role 3, 4, 5 disesuaikan dengan jenis akun dinas/instansi/lembaga
           where: {
             id: {
               [Op.in]: [3, 4, 5], 
@@ -71,14 +70,12 @@ exports.getByPagination = async (req, res) => {
       totalPages: Math.ceil(count / limit),
     });
   } catch (error) {
-    console.error(error);
     return errorResponse(res, "Internal Server Error");
   }
 };
 
 exports.create = async (req, res) => {
   try {
-    // Parameter disesuaikan dengan form di /daftar-instansi
     const { 
       jenis_akun, 
       username, 
@@ -94,24 +91,22 @@ exports.create = async (req, res) => {
       is_active 
     } = req.body;
 
-    const surat_penunjukan = req.file ? req.file.filename : null;
+    const surat_penunjukan = req.file ? (req.file.filename || req.file.key) : null;
 
-    // Menggunakan safeSplit karena Select di FE mengirimkan value gabungan (id#nama)
     const [idPerguruanTinggi, namaPerguruanTinggi] = safeSplit(perguruan_tinggi);
     const [idJenjang, namaJenjang] = safeSplit(jenjang);
     const [kodeProv, namaProv] = safeSplit(provinsi);
     const [kodeKab, namaKab] = safeSplit(kabkota);
 
-    // Hash password (menggunakan kolom 'pin' di database)
     let hashedPin = null;
     if (password) {
       hashedPin = await argon2.hash(password);
     } else {
-      hashedPin = await argon2.hash("123456"); // Default password jika admin tidak mengisi
+      hashedPin = await argon2.hash("123456");
     }
 
     const insertData = {
-      user_id: username, // username dimasukkan ke kolom user_id
+      user_id: username,
       pin: hashedPin,
       nama_lengkap: nama_lengkap || nama,
       email,
@@ -123,21 +118,19 @@ exports.create = async (req, res) => {
       kode_prov: kodeProv,
       prov: namaProv,
       kode_kab: kodeKab,
-      kab_kota: namaKab, // sesuai penamaan di DB
+      kab_kota: namaKab,
       surat_penunjukan,
       is_active: is_active !== undefined ? is_active : 1,
     };
 
     const user = await User.create(insertData);
 
-    // Insert ke tabel relasi UserRole untuk jenis_akun
     if (jenis_akun) {
       await UserRole.create({ id_user: user.id, id_role: jenis_akun });
     }
 
     return successResponse(res, "Akun instansi berhasil ditambahkan");
   } catch (error) {
-    console.error(error);
     return errorResponse(res, "Internal Server Error");
   }
 };
@@ -183,12 +176,10 @@ exports.getDetailById = async (req, res) => {
       where: { id_user: id },
     });
 
-    // Sesuaikan variabel balikan agar kompatibel dengan state form Frontend
     userData.jenis_akun = role?.id_role ? String(role.id_role) : null;
     userData.username = userData.user_id; 
     userData.nama = userData.nama_lengkap;
 
-    // Format id#nama agar komponen CustSearchableSelect bisa membaca defaultValue dengan benar
     userData.perguruan_tinggi = userData.id_perguruan_tinggi && userData.perguruan_tinggi
       ? `${userData.id_perguruan_tinggi}#${userData.perguruan_tinggi}`
       : null;
@@ -207,7 +198,6 @@ exports.getDetailById = async (req, res) => {
 
     return successResponse(res, "Data berhasil dimuat", userData);
   } catch (error) {
-    console.error(error);
     return errorResponse(res, "Internal Server Error");
   }
 };
@@ -230,7 +220,7 @@ exports.updateById = async (req, res) => {
       is_active 
     } = req.body;
 
-    const surat_penunjukan = req.file?.filename; 
+    const surat_penunjukan = req.file ? (req.file.filename || req.file.key) : null;
 
     const [idPerguruanTinggi, namaPerguruanTinggi] = safeSplit(perguruan_tinggi);
     const [idJenjang, namaJenjang] = safeSplit(jenjang);
@@ -270,7 +260,6 @@ exports.updateById = async (req, res) => {
 
     return successResponse(res, "Data dan role berhasil diperbarui");
   } catch (error) {
-    console.error(error);
     return errorResponse(res, "Internal Server Error");
   }
 };
@@ -283,7 +272,6 @@ exports.deleteById = async (req, res) => {
 
     return successResponse(res, "Data berhasil dihapus");
   } catch (error) {
-    console.error(error);
     return errorResponse(res, "Internal Server Error");
   }
 };

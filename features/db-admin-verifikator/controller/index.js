@@ -16,7 +16,6 @@ const { getFileUrl } = require("../../../common/middleware/upload_middleware");
 
 exports.getByPagination = async (req, res) => {
   try {
-    // Ambil parameter page dan limit dari query, default ke 1 dan 10
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
@@ -31,9 +30,8 @@ exports.getByPagination = async (req, res) => {
       whereCondition.id_lembaga_pendidikan = req.query.lpId;
     }
 
-    // Ambil data role + total count
     const { count, rows } = await User.findAndCountAll({
-      where: whereCondition, // search nama, dll
+      where: whereCondition,
       include: [
         {
           model: Role,
@@ -46,7 +44,7 @@ exports.getByPagination = async (req, res) => {
           through: {
             attributes: [],
           },
-          required: true, // INNER JOIN
+          required: true,
         },
       ],
       limit,
@@ -92,7 +90,7 @@ exports.create = async (req, res) => {
       is_active,
     } = req.body;
 
-    const surat_penunjukan = req.file.filename;
+    const surat_penunjukan = req.file ? (req.file.filename || req.file.key) : null;
 
     const [idLembagaPendidikan, namaLembagaPendidikan] =
       safeSplit(lembaga_pendidikan);
@@ -150,14 +148,15 @@ exports.getDetailById = async (req, res) => {
 
     if (!user) return failResponse(res, "Data tidak ditemukan", 200);
 
-    // Konversi ke plain object
     const userData = user.get({ plain: true });
 
-    userData.surat_penunjukan = getFileUrl(
-      req,
-      "surat_penunjukan",
-      userData.surat_penunjukan,
-    );
+    if (userData.surat_penunjukan) {
+      userData.surat_penunjukan = getFileUrl(
+        req,
+        "surat_penunjukan",
+        userData.surat_penunjukan,
+      );
+    }
 
     const role = await UserRole.findOne({
       where: { id_user: id },
@@ -167,7 +166,6 @@ exports.getDetailById = async (req, res) => {
 
     return successResponse(res, "Data berhasil dimuat", userData);
   } catch (error) {
-    console.error(error);
     return errorResponse(res, "Internal Server Error");
   }
 };
@@ -186,7 +184,7 @@ exports.updateById = async (req, res) => {
 
     const { id } = req.params;
 
-    const surat_penunjukan = req.file?.filename; // optional, jika ada file
+    const surat_penunjukan = req.file ? (req.file.filename || req.file.key) : null;
 
     const [idLembagaPendidikan, namaLembagaPendidikan] =
       safeSplit(lembaga_pendidikan);
@@ -206,18 +204,14 @@ exports.updateById = async (req, res) => {
       updateData.surat_penunjukan = surat_penunjukan;
     }
 
-    // Update user
     await User.update(updateData, { where: { id } });
 
-    // Hapus role lama dulu
     await UserRole.destroy({ where: { id_user: id } });
 
-    // Tambahkan role baru
     await UserRole.create({ id_user: id, id_role: jenis_akun });
 
     return successResponse(res, "Data berhasil diperbarui");
   } catch (error) {
-    console.error(error);
     return errorResponse("Internal Server Error");
   }
 };
@@ -226,7 +220,6 @@ exports.deleteById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Menghapus data berdasarkan id
     await User.destroy({ where: { id } });
 
     return successResponse(res, "Data berhasil dihapus");

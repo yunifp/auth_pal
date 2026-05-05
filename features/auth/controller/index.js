@@ -288,7 +288,8 @@ exports.register = async (req, res) => {
       kode_kab: kab.id,
       kab_kota: kab.label,
       is_active,
-      surat_penunjukan: fileSurat ? fileSurat.filename : null,
+      // ✅ FIX: Dinamis untuk Lokal dan S3
+      surat_penunjukan: fileSurat ? (fileSurat.filename || fileSurat.key) : null,
     });
 
     await UserRole.create({
@@ -366,7 +367,8 @@ exports.updateProfile = async (req, res) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const filename = req.file ? req.file.filename : null;
+    // ✅ FIX: Dinamis untuk Lokal dan S3
+    const filename = req.file ? (req.file.filename || req.file.key) : null;
     const { nama, current_pin, pin } = req.body;
 
     const user = await User.findByPk(decoded.id);

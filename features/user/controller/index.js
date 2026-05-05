@@ -86,7 +86,8 @@ exports.createUser = async (req, res) => {
     }
 
     if (req.file) {
-      userData.avatar = req.file.filename;
+      // ✅ FIX: Dinamis untuk Lokal dan S3
+      userData.avatar = req.file.filename || req.file.key;
     }
 
     const hashedPassword = await argon2.hash(userData.password);
@@ -166,7 +167,8 @@ exports.updateById = async (req, res) => {
     }
 
     if (req.file) {
-      userData.avatar = req.file.filename;
+      // ✅ FIX: Dinamis untuk Lokal dan S3
+      userData.avatar = req.file.filename || req.file.key;
     }
 
     const updatePayload = {
