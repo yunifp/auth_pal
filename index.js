@@ -1,3 +1,5 @@
+const dotenv = require("dotenv");
+dotenv.config({ path: "./config.env" }); 
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -5,6 +7,7 @@ const morgan = require("morgan");
 const bodyParser = require("body-parser");
 
 const checkAuthorization = require("./common/middleware/auth_middleware");
+const { serveSecureFileProxy } = require("./common/middleware/upload_middleware");
 
 const app = express();
 app.set("trust proxy", true);
@@ -23,6 +26,9 @@ app.use(
 );
 
 app.use("/uploads", express.static(process.env.FILE_URL || "E:/upload_palma"));
+
+// Endpoint Proxy S3 yang dilindungi JWT
+app.get("/api/files/view", serveSecureFileProxy);
 
 app.use("/api/auth/auth", require("./features/auth/route"));
 app.use(

@@ -7,7 +7,7 @@ const {
 const argon2 = require("argon2");
 const ExcelJS = require("exceljs");
 const { Op } = require("sequelize");
-const { getFileUrl } = require("../../../common/middleware/upload_middleware");
+const { getFileUrl, deleteFile } = require("../../../common/middleware/upload_middleware");
 const { sequelize } = require("../../../core/db_config");
 const { generateUserId, generatePin } = require("../../../utils/stringFormatter");
 
@@ -86,7 +86,6 @@ exports.createUser = async (req, res) => {
     }
 
     if (req.file) {
-      // ✅ FIX: Dinamis untuk Lokal dan S3
       userData.avatar = req.file.filename || req.file.key;
     }
 
@@ -127,11 +126,12 @@ exports.getDetailById = async (req, res) => {
 
     if (!user) return failResponse(res, "Data tidak ditemukan", 200);
 
-    const avatarFile = user.avatar ? user.avatar : "default.jpg";
-
     const userData = user.toJSON();
 
-    userData.avatar = getFileUrl(req, "profile", avatarFile);
+    // Hapus await
+    userData.avatar = (userData.avatar && userData.avatar !== "default.jpg") 
+      ? getFileUrl(req, "profile", userData.avatar) 
+      : null;
 
     const role = userData.Roles;
 
@@ -167,7 +167,10 @@ exports.updateById = async (req, res) => {
     }
 
     if (req.file) {
-      // ✅ FIX: Dinamis untuk Lokal dan S3
+      const userToUpdate = await User.findByPk(id);
+      if (userToUpdate && userToUpdate.avatar && userToUpdate.avatar !== "default.jpg") {
+        await deleteFile("profile", userToUpdate.avatar);
+      }
       userData.avatar = req.file.filename || req.file.key;
     }
 
@@ -204,8 +207,11 @@ exports.updateById = async (req, res) => {
     });
 
     const userDataJson = updatedUser.toJSON();
-    const avatarFile = userDataJson.avatar || "default.jpg";
-    userDataJson.avatar = getFileUrl(req, "profile", avatarFile);
+    
+    // Hapus await
+    userDataJson.avatar = (userDataJson.avatar && userDataJson.avatar !== "default.jpg") 
+      ? getFileUrl(req, "profile", userDataJson.avatar) 
+      : null;
 
     const result = {
       ...userDataJson,
@@ -222,6 +228,11 @@ exports.updateById = async (req, res) => {
 exports.deleteById = async (req, res) => {
   try {
     const { id } = req.params;
+
+    const user = await User.findByPk(id);
+    if (user && user.avatar && user.avatar !== "default.jpg") {
+      await deleteFile("profile", user.avatar);
+    }
 
     await User.destroy({ where: { id } });
 
@@ -298,12 +309,13 @@ exports.getOpPt = async (req, res) => {
     if (!users || users.length === 0)
       return failResponse(res, "Data tidak ditemukan", 200);
 
+    // Hapus Promise.all dan await, kembalikan ke .map biasa
     const formattedUser = users.map((user) => {
       const userData = user.toJSON();
 
-      const avatarFile = userData.avatar ? userData.avatar : "default.jpg";
-
-      userData.avatar = getFileUrl(req, "profile", avatarFile);
+      userData.avatar = (userData.avatar && userData.avatar !== "default.jpg") 
+        ? getFileUrl(req, "profile", userData.avatar) 
+        : null;
 
       return userData;
     });
@@ -333,11 +345,14 @@ exports.getVerifPt = async (req, res) => {
 
     if (!users || users.length === 0)
       return failResponse(res, "Data tidak ditemukan", 200);
+      
+    // Hapus Promise.all dan await, kembalikan ke .map biasa
     const formattedUser = users.map((user) => {
       const userData = user.toJSON();
 
-      const avatarFile = userData.avatar ? userData.avatar : "default.jpg";
-      userData.avatar = getFileUrl(req, "profile", avatarFile);
+      userData.avatar = (userData.avatar && userData.avatar !== "default.jpg") 
+        ? getFileUrl(req, "profile", userData.avatar) 
+        : null;
 
       return userData;
     });

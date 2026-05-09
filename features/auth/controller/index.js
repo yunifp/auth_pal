@@ -8,7 +8,7 @@ const {
 const argon2 = require("argon2");
 const jwt = require("jsonwebtoken");
 const { literal, Op } = require("sequelize");
-const { getFileUrl } = require("../../../common/middleware/upload_middleware");
+const { getFileUrl, deleteFile } = require("../../../common/middleware/upload_middleware");
 const {
   generateUserId,
   generatePin,
@@ -115,7 +115,10 @@ exports.login = async (req, res) => {
 
     await user.update({ refresh_token: refreshToken });
 
-    const avatarFile = user.avatar ? user.avatar : "default.jpg";
+    // Hapus await
+    const userAvatar = (user.avatar && user.avatar !== "default.jpg") 
+      ? getFileUrl(req, "profile", user.avatar) 
+      : null;
 
     let redirectPage = "/home";
     if (jenis_akun === "instansi") {
@@ -136,7 +139,7 @@ exports.login = async (req, res) => {
         kode_prov: user.kode_prov,
         kode_kab: user.kode_kab,
         role: user.Roles,
-        avatar: getFileUrl(req, "profile", avatarFile),
+        avatar: userAvatar,
       },
       accessToken,
       refreshToken,
@@ -288,7 +291,6 @@ exports.register = async (req, res) => {
       kode_kab: kab.id,
       kab_kota: kab.label,
       is_active,
-      // ✅ FIX: Dinamis untuk Lokal dan S3
       surat_penunjukan: fileSurat ? (fileSurat.filename || fileSurat.key) : null,
     });
 
@@ -308,7 +310,7 @@ exports.register = async (req, res) => {
         </div>
         <p style="color: red; font-size: 13px;"><b>Penting:</b> Harap simpan informasi ini dengan baik. Jika Anda adalah penerima beasiswa, Anda diwajibkan untuk mengubah PIN ini setelah berhasil login.</p>
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${process.env.BASE_URL || 'https://beasiswa.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
+          <a href="${process.env.REDIRECT_URL || 'https://beasiswa.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
         </div>
         <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
         <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
@@ -343,12 +345,15 @@ exports.getProfile = async (req, res) => {
       attributes: { exclude: ["password"] },
     });
 
-    const avatarFile = userRaw.avatar ? userRaw.avatar : "default.jpg";
+    // Hapus await
+    const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg") 
+      ? getFileUrl(req, "profile", userRaw.avatar) 
+      : null;
 
     const user = {
       nama: userRaw.nama_lengkap,
       user_id: userRaw.user_id,
-      avatar: getFileUrl(req, "profile", avatarFile),
+      avatar: userAvatar,
     };
 
     return successResponse(res, "User berhasil dimuat", user);
@@ -367,7 +372,6 @@ exports.updateProfile = async (req, res) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // ✅ FIX: Dinamis untuk Lokal dan S3
     const filename = req.file ? (req.file.filename || req.file.key) : null;
     const { nama, current_pin, pin } = req.body;
 
@@ -381,6 +385,9 @@ exports.updateProfile = async (req, res) => {
     };
 
     if (filename) {
+      if (user.avatar && user.avatar !== "default.jpg") {
+        await deleteFile("profile", user.avatar);
+      }
       updateData.avatar = filename;
     }
 
@@ -406,13 +413,16 @@ exports.updateProfile = async (req, res) => {
       attributes: { exclude: ["pin"] },
     });
 
-    const avatarFile = userRaw.avatar || "default.jpg";
+    // Hapus await
+    const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg") 
+      ? getFileUrl(req, "profile", userRaw.avatar) 
+      : null;
 
     const responseUser = {
       id: userRaw.id,
       user_id: userRaw.user_id,
       nama: userRaw.nama_lengkap,
-      avatar: getFileUrl(req, "profile", avatarFile),
+      avatar: userAvatar,
       telah_ganti_pin: userRaw.telah_ganti_pin,
     };
 

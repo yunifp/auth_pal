@@ -8,7 +8,8 @@ const { Op } = require("sequelize");
 const { User, UserRole } = require("../../../models");
 const { safeSplit } = require("../../../utils/stringFormatter");
 const argon2 = require("argon2");
-const { getFileUrl } = require("../../../common/middleware/upload_middleware");
+// Tambahkan deleteFile ke import
+const { getFileUrl, deleteFile } = require("../../../common/middleware/upload_middleware");
 
 exports.getByPagination = async (req, res) => {
   try {
@@ -248,6 +249,11 @@ exports.updateById = async (req, res) => {
     }
 
     if (surat_penunjukan) {
+      // Hapus surat_penunjukan lama di S3 jika ada file baru diupload
+      const userToUpdate = await User.findByPk(id);
+      if (userToUpdate && userToUpdate.surat_penunjukan) {
+        await deleteFile("surat_penunjukan", userToUpdate.surat_penunjukan);
+      }
       updateData.surat_penunjukan = surat_penunjukan;
     }
 
@@ -267,6 +273,13 @@ exports.updateById = async (req, res) => {
 exports.deleteById = async (req, res) => {
   try {
     const { id } = req.params;
+    
+    // Hapus surat_penunjukan di S3 sebelum data dihapus dari DB
+    const user = await User.findByPk(id);
+    if (user && user.surat_penunjukan) {
+      await deleteFile("surat_penunjukan", user.surat_penunjukan);
+    }
+
     await UserRole.destroy({ where: { id_user: id } });
     await User.destroy({ where: { id } });
 

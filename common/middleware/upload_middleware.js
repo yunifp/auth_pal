@@ -1,66 +1,29 @@
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const multerS3 = require("multer-s3");
 const { v4: uuidv4, v5: uuidv5 } = require("uuid");
-const axios = require("axios");
+const jwt = require("jsonwebtoken");
 
-const baseUploadDir = process.env.FILE_URL;
+const baseUploadDir = process.env.FILE_URL || "E:/upload_palma";
 const storageType = process.env.DATABASE_PENYIMPANAN || "biasa";
 const APP_NAMESPACE = "1b671a64-40d5-491e-99b0-da01ff1f3341";
 
-const primaryEndpoint = process.env.NEO_ENDPOINT || "https://nos.wjv-1.neo.id";
-const secondaryEndpoint = process.env.NEO_ENDPOINT_SECONDARY || "https://nos.jkt-1.neo.id";
-const UPLOAD_BUCKET = process.env.NEO_BUCKET_UPLOAD || "palma-upload-bucket-testing";
+const UPLOAD_BUCKET = process.env.S3_BUCKET_NAME || "palma-upload-bucket-testing";
 
-let activeEndpoint = primaryEndpoint;
-let s3Proxy = null;
-let currentS3Client = null;
-let primaryClient = null;
-let secondaryClient = null;
+let s3Client = null;
 
 if (storageType === "s3") {
-  const s3Config = {
-    region: process.env.NEO_REGION || "wjv-1",
+  s3Client = new S3Client({
+    region: process.env.S3_REGION || "ap-southeast-2",
     credentials: {
-      accessKeyId: process.env.NEO_ACCESS_KEY,
-      secretAccessKey: process.env.NEO_SECRET_KEY,
+      accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
+      secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,
     },
-    forcePathStyle: true,
-  };
-
-  primaryClient = new S3Client({ ...s3Config, endpoint: primaryEndpoint });
-  secondaryClient = new S3Client({ ...s3Config, endpoint: secondaryEndpoint });
-  currentS3Client = primaryClient;
-
-  s3Proxy = new Proxy({}, {
-    get: (target, prop) => {
-      if (typeof currentS3Client[prop] === "function") {
-        return currentS3Client[prop].bind(currentS3Client);
-      }
-      return currentS3Client[prop];
-    }
+    forcePathStyle: true, 
   });
 }
-
-let lastEndpointCheck = 0;
-const checkAndSwitchEndpoint = async () => {
-  if (storageType !== "s3") return;
-  const now = Date.now();
-  if (now - lastEndpointCheck < 30000) return;
-
-  try {
-    await axios.get(primaryEndpoint, { timeout: 3000 });
-    currentS3Client = primaryClient;
-    activeEndpoint = primaryEndpoint;
-    lastEndpointCheck = now;
-  } catch (error) {
-    currentS3Client = secondaryClient;
-    activeEndpoint = secondaryEndpoint;
-    lastEndpointCheck = now;
-  }
-};
 
 const ensureDirectoryExists = (dirPath) => {
   if (!fs.existsSync(dirPath)) {
@@ -85,14 +48,11 @@ const generateS3Path = (req, file, folderName, rawName) => {
 const createStorage = (folderName) => {
   if (storageType === "s3") {
     return multerS3({
-      s3: s3Proxy,
+      s3: s3Client,
       bucket: UPLOAD_BUCKET,
-      acl: "public-read",
       contentType: multerS3.AUTO_CONTENT_TYPE,
       key: async (req, file, cb) => {
         try {
-          await checkAndSwitchEndpoint();
-
           const ext = path.extname(file.originalname);
           let identifier = req.user?.user_id || req.body?.username || uuidv4();
           const staticUUID = uuidv5(`${folderName}_${identifier}`, APP_NAMESPACE);
@@ -194,32 +154,192 @@ const uploadConfigs = {
   },
 };
 
+// === FUNGSI PROXY DENGAN KEAMANAN JWT & KEPEMILIKAN ===
+// const serveSecureFileProxy = async (req, res) => {
+//   const { folder, file, token } = req.query;
+
+//   if (!file || !folder) return res.status(400).send("Folder dan file wajib diisi");
+  
+//   if (!token) return res.status(401).send("Akses ditolak: Token otentikasi tidak ditemukan");
+
+//   const fetchDest = req.headers['sec-fetch-dest'];
+//   const referer = req.headers.referer;
+
+//   if (fetchDest === 'document' || !referer) {
+//     return res.status(403).send("Akses Ditolak: Gambar hanya bisa dimuat dari dalam aplikasi Palma Beasiswa.");
+//   }
+//   // =============================================================
+
+//   try {
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+//     // Lapis 2: Validasi Kepemilikan (Mencegah user melihat file user lain)
+//     if (file.includes("AUTH_") && !file.includes("AUTH_UMUM")) {
+//       const pathParts = file.split('/');
+//       const authFolder = pathParts.find(p => p.startsWith("AUTH_"));
+      
+//       const expectedFolder = `AUTH_${decoded.user_id.toUpperCase()}`;
+//       if (authFolder && authFolder !== expectedFolder) {
+//         return res.status(403).send("Akses ditolak: Anda tidak memiliki izin untuk melihat file ini");
+//       }
+//     }
+
+//     const currentStorageType = process.env.DATABASE_PENYIMPANAN || "biasa";
+
+//     if (currentStorageType === "s3") {
+//       const fileKey = file.includes("/") ? file : `${folder}/${file}`;
+//       const command = new GetObjectCommand({
+//         Bucket: UPLOAD_BUCKET,
+//         Key: fileKey,
+//       });
+
+//       // Pastikan s3Client sudah ada (lazy load protection)
+//       if (!s3Client) {
+//         s3Client = new S3Client({
+//           region: process.env.S3_REGION || "ap-southeast-2",
+//           credentials: {
+//             accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
+//             secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,
+//           },
+//           forcePathStyle: true,
+//         });
+//       }
+
+//       const response = await s3Client.send(command);
+
+//       res.setHeader("Content-Type", response.ContentType);
+//       res.setHeader("Cache-Control", "private, max-age=3600");
+//       if (response.ContentLength) res.setHeader("Content-Length", response.ContentLength);
+
+//       response.Body.pipe(res);
+//     } else {
+//       const currentBaseUploadDir = process.env.FILE_URL || "E:/upload_palma";
+//       const filePath = path.join(currentBaseUploadDir, folder, file);
+//       if (fs.existsSync(filePath)) {
+//         res.sendFile(filePath);
+//       } else {
+//         res.status(404).send("File lokal tidak ditemukan");
+//       }
+//     }
+
+//   } catch (error) {
+//     if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+//       return res.status(401).send("Sesi tidak valid atau telah berakhir");
+//     }
+//     console.error("Proxy Error:", error.message);
+//     res.status(404).send("Gagal memuat file");
+//   }
+// };
+
+// === FUNGSI PROXY DENGAN KEAMANAN JWT & KEPEMILIKAN ===
+const serveSecureFileProxy = async (req, res) => {
+  const { folder, file } = req.query;
+
+  if (!file || !folder) return res.status(400).send("Folder dan file wajib diisi");
+  
+  // Lapis 1: Ambil token dari Header (Bukan dari URL lagi)
+  const authHeader = req.headers['authorization'];
+  let token = req.query.token; // Fallback
+
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
+  }
+
+  if (!token) return res.status(401).send("Akses ditolak: Token otentikasi tidak ditemukan");
+
+ // === LAPIS 3: ANTI COPY-PASTE ADDRESS BAR ===
+  const fetchDest = req.headers['sec-fetch-dest'];
+  const fetchMode = req.headers['sec-fetch-mode'];
+  
+  // Blokir HANYA JIKA diakses langsung via Address Bar (navigate/document)
+  // Tapi izinkan jika itu adalah request XHR/Fetch dari Axios (cors/no-cors) atau tag img (image)
+  if (fetchDest === 'document' && fetchMode === 'navigate') {
+    return res.status(403).send("Akses Ditolak: Gambar/File hanya bisa dimuat dari dalam aplikasi Palma Beasiswa.");
+  }
+  // ===========================================
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Lapis 2: Validasi Kepemilikan 
+    if (file.includes("AUTH_") && !file.includes("AUTH_UMUM")) {
+      const pathParts = file.split('/');
+      const authFolder = pathParts.find(p => p.startsWith("AUTH_"));
+      
+      const expectedFolder = `AUTH_${decoded.user_id.toUpperCase()}`;
+      if (authFolder && authFolder !== expectedFolder) {
+        return res.status(403).send("Akses ditolak: Anda tidak memiliki izin untuk melihat file ini");
+      }
+    }
+
+    const currentStorageType = process.env.DATABASE_PENYIMPANAN || "biasa";
+
+    if (currentStorageType === "s3") {
+      const fileKey = file.includes("/") ? file : `${folder}/${file}`;
+      const command = new GetObjectCommand({
+        Bucket: UPLOAD_BUCKET,
+        Key: fileKey,
+      });
+
+      if (!s3Client) {
+        s3Client = new S3Client({
+          region: process.env.S3_REGION || "ap-southeast-2",
+          credentials: {
+            accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
+            secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,
+          },
+          forcePathStyle: true,
+        });
+      }
+
+      const response = await s3Client.send(command);
+
+      res.setHeader("Content-Type", response.ContentType);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      if (response.ContentLength) res.setHeader("Content-Length", response.ContentLength);
+
+      response.Body.pipe(res);
+    } else {
+      const currentBaseUploadDir = process.env.FILE_URL || "E:/upload_palma";
+      const filePath = path.join(currentBaseUploadDir, folder, file);
+      if (fs.existsSync(filePath)) {
+        res.sendFile(filePath);
+      } else {
+        res.status(404).send("File lokal tidak ditemukan");
+      }
+    }
+
+  } catch (error) {
+    if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+      return res.status(401).send("Sesi tidak valid atau telah berakhir");
+    }
+    console.error("Proxy Error:", error.message);
+    res.status(404).send("Gagal memuat file");
+  }
+};
+
+// === FUNGSI SYNCHRONOUS UNTUK MENGHASILKAN URL PROXY ===
 const getFileUrl = (req, folderName, filename) => {
   if (!filename) return null;
-  const cacheBuster = `?t=${Date.now()}`;
-
-  if (storageType === "s3") {
-    if (filename.includes("/")) {
-       return `${activeEndpoint}/${UPLOAD_BUCKET}/${filename}${cacheBuster}`;
-    }
-    return `${activeEndpoint}/${UPLOAD_BUCKET}/${folderName}/${filename}${cacheBuster}`;
-  }
+  const cacheBuster = `&t=${Date.now()}`;
   
   const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}/backend`;
-  return `${baseUrl}/uploads/${folderName}/${filename}${cacheBuster}`;
+  const encodedFilename = encodeURIComponent(filename);
+  const encodedFolder = encodeURIComponent(folderName);
+
+  return `${baseUrl}/api/files/view?folder=${encodedFolder}&file=${encodedFilename}${cacheBuster}`;
 };
 
 const deleteFile = async (folderName, filename) => {
   if (!filename) return false;
   if (storageType === "s3") {
-    await checkAndSwitchEndpoint(); 
     const fileKey = filename.includes("/") ? filename : `${folderName}/${filename}`;
     const command = new DeleteObjectCommand({
       Bucket: UPLOAD_BUCKET,
       Key: fileKey,
     });
     try {
-      await s3Proxy.send(command); 
+      await s3Client.send(command); 
       return true;
     } catch (error) {
       return false;
@@ -240,4 +360,5 @@ module.exports = {
   deleteFile,
   ensureDirectoryExists,
   baseUploadDir,
+  serveSecureFileProxy,
 };
