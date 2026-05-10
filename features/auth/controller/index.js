@@ -115,7 +115,6 @@ exports.login = async (req, res) => {
 
     await user.update({ refresh_token: refreshToken });
 
-    // Hapus await
     const userAvatar = (user.avatar && user.avatar !== "default.jpg") 
       ? getFileUrl(req, "profile", user.avatar) 
       : null;
@@ -334,18 +333,32 @@ exports.register = async (req, res) => {
   }
 };
 
+
 exports.getProfile = async (req, res) => {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader.split(" ")[1];
-
-  const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
   try {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader) {
+      return errorResponse(res, "Token otorisasi tidak ditemukan", 401);
+    }
+
+    const token = authHeader.split(" ")[1];
+    
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (jwtErr) {
+      // Mengembalikan respons 401 secara aman saat token expired
+      return errorResponse(res, "Sesi Anda telah habis (Token Expired)", 401);
+    }
+
     const userRaw = await User.findByPk(decoded.id, {
       attributes: { exclude: ["password"] },
     });
 
-    // Hapus await
+    if (!userRaw) {
+      return errorResponse(res, "User tidak ditemukan", 404);
+    }
+
     const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg") 
       ? getFileUrl(req, "profile", userRaw.avatar) 
       : null;
@@ -370,7 +383,13 @@ exports.updateProfile = async (req, res) => {
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (jwtErr) {
+      return errorResponse(res, "Sesi Anda telah habis (Token Expired)", 401);
+    }
 
     const filename = req.file ? (req.file.filename || req.file.key) : null;
     const { nama, current_pin, pin } = req.body;
@@ -413,7 +432,6 @@ exports.updateProfile = async (req, res) => {
       attributes: { exclude: ["pin"] },
     });
 
-    // Hapus await
     const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg") 
       ? getFileUrl(req, "profile", userRaw.avatar) 
       : null;
