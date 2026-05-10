@@ -155,97 +155,10 @@ const uploadConfigs = {
 };
 
 // === FUNGSI PROXY DENGAN KEAMANAN JWT & KEPEMILIKAN ===
-// const serveSecureFileProxy = async (req, res) => {
-//   const { folder, file, token } = req.query;
-
-//   if (!file || !folder) return res.status(400).send("Folder dan file wajib diisi");
-  
-//   if (!token) return res.status(401).send("Akses ditolak: Token otentikasi tidak ditemukan");
-
-//   const fetchDest = req.headers['sec-fetch-dest'];
-//   const referer = req.headers.referer;
-
-//   if (fetchDest === 'document' || !referer) {
-//     return res.status(403).send("Akses Ditolak: Gambar hanya bisa dimuat dari dalam aplikasi Palma Beasiswa.");
-//   }
-//   // =============================================================
-
-//   try {
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-//     // Lapis 2: Validasi Kepemilikan (Mencegah user melihat file user lain)
-//     if (file.includes("AUTH_") && !file.includes("AUTH_UMUM")) {
-//       const pathParts = file.split('/');
-//       const authFolder = pathParts.find(p => p.startsWith("AUTH_"));
-      
-//       const expectedFolder = `AUTH_${decoded.user_id.toUpperCase()}`;
-//       if (authFolder && authFolder !== expectedFolder) {
-//         return res.status(403).send("Akses ditolak: Anda tidak memiliki izin untuk melihat file ini");
-//       }
-//     }
-
-//     const currentStorageType = process.env.DATABASE_PENYIMPANAN || "biasa";
-
-//     if (currentStorageType === "s3") {
-//       const fileKey = file.includes("/") ? file : `${folder}/${file}`;
-//       const command = new GetObjectCommand({
-//         Bucket: UPLOAD_BUCKET,
-//         Key: fileKey,
-//       });
-
-//       // Pastikan s3Client sudah ada (lazy load protection)
-//       if (!s3Client) {
-//         s3Client = new S3Client({
-//           region: process.env.S3_REGION || "ap-southeast-2",
-//           credentials: {
-//             accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
-//             secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,
-//           },
-//           forcePathStyle: true,
-//         });
-//       }
-
-//       const response = await s3Client.send(command);
-
-//       res.setHeader("Content-Type", response.ContentType);
-//       res.setHeader("Cache-Control", "private, max-age=3600");
-//       if (response.ContentLength) res.setHeader("Content-Length", response.ContentLength);
-
-//       response.Body.pipe(res);
-//     } else {
-//       const currentBaseUploadDir = process.env.FILE_URL || "E:/upload_palma";
-//       const filePath = path.join(currentBaseUploadDir, folder, file);
-//       if (fs.existsSync(filePath)) {
-//         res.sendFile(filePath);
-//       } else {
-//         res.status(404).send("File lokal tidak ditemukan");
-//       }
-//     }
-
-//   } catch (error) {
-//     if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
-//       return res.status(401).send("Sesi tidak valid atau telah berakhir");
-//     }
-//     console.error("Proxy Error:", error.message);
-//     res.status(404).send("Gagal memuat file");
-//   }
-// };
-
-// === FUNGSI PROXY DENGAN KEAMANAN JWT & KEPEMILIKAN ===
 const serveSecureFileProxy = async (req, res) => {
   const { folder, file } = req.query;
 
   if (!file || !folder) return res.status(400).send("Folder dan file wajib diisi");
-  
-  // Lapis 1: Ambil token dari Header (Bukan dari URL lagi)
-  const authHeader = req.headers['authorization'];
-  let token = req.query.token; // Fallback
-
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    token = authHeader.split(" ")[1];
-  }
-
-  if (!token) return res.status(401).send("Akses ditolak: Token otentikasi tidak ditemukan");
 
  // === LAPIS 3: ANTI COPY-PASTE ADDRESS BAR ===
   const fetchDest = req.headers['sec-fetch-dest'];
@@ -258,15 +171,20 @@ const serveSecureFileProxy = async (req, res) => {
   }
   // ===========================================
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  // Ambil data user dari checkAuthorization di index.js
+  const user = req.user;
+  if (!user) return res.status(401).send("Akses ditolak: User tidak valid");
 
-    // Lapis 2: Validasi Kepemilikan 
+  try {
+    // Lapis 4: Validasi Kepemilikan (Memanfaatkan payload JWT yang sudah di-decode middleware)
     if (file.includes("AUTH_") && !file.includes("AUTH_UMUM")) {
       const pathParts = file.split('/');
       const authFolder = pathParts.find(p => p.startsWith("AUTH_"));
       
-      const expectedFolder = `AUTH_${decoded.user_id.toUpperCase()}`;
+      // Menggunakan identifier user yang sesuai dengan struktur JWT Anda (user_id / id)
+      const userId = user.user_id || user.id; 
+      const expectedFolder = `AUTH_${String(userId).toUpperCase()}`;
+      
       if (authFolder && authFolder !== expectedFolder) {
         return res.status(403).send("Akses ditolak: Anda tidak memiliki izin untuk melihat file ini");
       }
@@ -310,9 +228,6 @@ const serveSecureFileProxy = async (req, res) => {
     }
 
   } catch (error) {
-    if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
-      return res.status(401).send("Sesi tidak valid atau telah berakhir");
-    }
     console.error("Proxy Error:", error.message);
     res.status(404).send("Gagal memuat file");
   }

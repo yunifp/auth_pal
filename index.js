@@ -16,7 +16,14 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
   }),
 );
-app.use(cors());
+
+// [PENYESUAIAN 1]: Konfigurasi CORS agar menerima Custom Header X-Palma-Auth dan Lapis 2
+app.use(cors({
+  origin: "*", // Sangat disarankan diganti spesifik ke "https://beasiswa.dev-palma.my.id" di production
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Palma-Auth", "Sec-Fetch-Dest", "Referer"]
+}));
+
 app.use(morgan("dev"));
 app.use(bodyParser.json());
 app.use(
@@ -27,8 +34,13 @@ app.use(
 
 app.use("/uploads", express.static(process.env.FILE_URL || "E:/upload_palma"));
 
-// Endpoint Proxy S3 yang dilindungi JWT
-app.get("/api/files/view", serveSecureFileProxy);
+// [PENYESUAIAN 2]: Sisipkan checkAuthorization agar membaca header X-Palma-Auth
+// sebelum meneruskan ke serveSecureFileProxy
+app.get(
+  "/api/files/view", 
+  checkAuthorization, 
+  serveSecureFileProxy
+);
 
 app.use("/api/auth/auth", require("./features/auth/route"));
 app.use(
