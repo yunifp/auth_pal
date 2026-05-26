@@ -4,33 +4,27 @@ const fs = require("fs");
 const { S3Client, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const multerS3 = require("multer-s3");
 const { v4: uuidv4, v5: uuidv5 } = require("uuid");
-const jwt = require("jsonwebtoken");
 
 const baseUploadDir = process.env.FILE_URL || "E:/upload_palma";
 const storageType = process.env.DATABASE_PENYIMPANAN || "biasa";
 const APP_NAMESPACE = "1b671a64-40d5-491e-99b0-da01ff1f3341";
 
-const UPLOAD_BUCKET = process.env.S3_BUCKET_NAME ;
+// Pemisahan bucket upload dan bucket download sesuai instruksi Biznet
+const UPLOAD_BUCKET = process.env.S3_BUCKET_NAME;
+const DOWNLOAD_BUCKET = process.env.S3_DOWNLOAD_BUCKET_NAME || UPLOAD_BUCKET; 
 
 let s3Client = null;
 
 if (storageType === "s3") {
+  // [PERBAIKAN 1]: Konfigurasi S3 Client disederhanakan khusus untuk layanan S3-Compatible
   s3Client = new S3Client({
-    region: process.env.S3_REGION,
+    region: process.env.S3_REGION || "wjv-1",
     endpoint: process.env.S3_ENDPOINT || undefined,
     credentials: {
       accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
       secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,
     },
-    forcePathStyle: true,
-    tls: true,
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    responseChecksumValidation: "WHEN_REQUIRED",
-    requestHandler: new (require("@aws-sdk/node-http-handler").NodeHttpHandler)({
-      httpsAgent: new (require("https").Agent)({
-        rejectUnauthorized: false
-      })
-    }), 
+    forcePathStyle: true, // WAJIB TRUE untuk Biznet NOS
   });
 }
 
@@ -59,7 +53,10 @@ const createStorage = (folderName) => {
     return multerS3({
       s3: s3Client,
       bucket: UPLOAD_BUCKET,
-      contentType: multerS3.AUTO_CONTENT_TYPE,
+      // [PERBAIKAN 2]: Matikan AUTO_CONTENT_TYPE, gunakan mimetype asli bawaan file
+      contentType: (req, file, cb) => {
+        cb(null, file.mimetype);
+      },
       key: async (req, file, cb) => {
         try {
           const ext = path.extname(file.originalname);
@@ -169,28 +166,23 @@ const serveSecureFileProxy = async (req, res) => {
 
   if (!file || !folder) return res.status(400).send("Folder dan file wajib diisi");
 
- // === LAPIS 3: ANTI COPY-PASTE ADDRESS BAR ===
+  // === LAPIS 3: ANTI COPY-PASTE ADDRESS BAR ===
   const fetchDest = req.headers['sec-fetch-dest'];
   const fetchMode = req.headers['sec-fetch-mode'];
   
-  // Blokir HANYA JIKA diakses langsung via Address Bar (navigate/document)
-  // Tapi izinkan jika itu adalah request XHR/Fetch dari Axios (cors/no-cors) atau tag img (image)
   if (fetchDest === 'document' && fetchMode === 'navigate') {
     return res.status(403).send("Akses Ditolak: Gambar/File hanya bisa dimuat dari dalam aplikasi Palma Beasiswa.");
   }
   // ===========================================
 
-  // Ambil data user dari checkAuthorization di index.js
   const user = req.user;
   if (!user) return res.status(401).send("Akses ditolak: User tidak valid");
 
   try {
-    // Lapis 4: Validasi Kepemilikan (Memanfaatkan payload JWT yang sudah di-decode middleware)
     if (file.includes("AUTH_") && !file.includes("AUTH_UMUM")) {
       const pathParts = file.split('/');
       const authFolder = pathParts.find(p => p.startsWith("AUTH_"));
       
-      // Menggunakan identifier user yang sesuai dengan struktur JWT Anda (user_id / id)
       const userId = user.user_id || user.id; 
       const expectedFolder = `AUTH_${String(userId).toUpperCase()}`;
       
@@ -203,14 +195,16 @@ const serveSecureFileProxy = async (req, res) => {
 
     if (currentStorageType === "s3") {
       const fileKey = file.includes("/") ? file : `${folder}/${file}`;
+      
+      // Mengambil objek file dari Bucket khusus Download
       const command = new GetObjectCommand({
-        Bucket: UPLOAD_BUCKET,
+        Bucket: DOWNLOAD_BUCKET, 
         Key: fileKey,
       });
 
       if (!s3Client) {
         s3Client = new S3Client({
-          region: process.env.S3_REGION || "ap-southeast-2",
+          region: process.env.S3_REGION || "wjv-1", 
           credentials: {
             accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
             secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,
@@ -242,7 +236,6 @@ const serveSecureFileProxy = async (req, res) => {
   }
 };
 
-// === FUNGSI SYNCHRONOUS UNTUK MENGHASILKAN URL PROXY ===
 const getFileUrl = (req, folderName, filename) => {
   if (!filename) return null;
   const cacheBuster = `&t=${Date.now()}`;
@@ -258,6 +251,8 @@ const deleteFile = async (folderName, filename) => {
   if (!filename) return false;
   if (storageType === "s3") {
     const fileKey = filename.includes("/") ? filename : `${folderName}/${filename}`;
+    
+    // Proses penghapusan tetap dilakukan pada Bucket asal (Upload Bucket)
     const command = new DeleteObjectCommand({
       Bucket: UPLOAD_BUCKET,
       Key: fileKey,
