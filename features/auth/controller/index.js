@@ -115,8 +115,8 @@ exports.login = async (req, res) => {
 
     await user.update({ refresh_token: refreshToken });
 
-    const userAvatar = (user.avatar && user.avatar !== "default.jpg") 
-      ? getFileUrl(req, "profile", user.avatar) 
+    const userAvatar = (user.avatar && user.avatar !== "default.jpg")
+      ? getFileUrl(req, "profile", user.avatar)
       : null;
 
     let redirectPage = "/home";
@@ -342,7 +342,7 @@ exports.getProfile = async (req, res) => {
     }
 
     const token = authHeader.split(" ")[1];
-    
+
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -359,8 +359,8 @@ exports.getProfile = async (req, res) => {
       return errorResponse(res, "User tidak ditemukan", 404);
     }
 
-    const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg") 
-      ? getFileUrl(req, "profile", userRaw.avatar) 
+    const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg")
+      ? getFileUrl(req, "profile", userRaw.avatar)
       : null;
 
     const user = {
@@ -383,7 +383,7 @@ exports.updateProfile = async (req, res) => {
     }
 
     const token = authHeader.split(" ")[1];
-    
+
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -432,8 +432,8 @@ exports.updateProfile = async (req, res) => {
       attributes: { exclude: ["pin"] },
     });
 
-    const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg") 
-      ? getFileUrl(req, "profile", userRaw.avatar) 
+    const userAvatar = (userRaw.avatar && userRaw.avatar !== "default.jpg")
+      ? getFileUrl(req, "profile", userRaw.avatar)
       : null;
 
     const responseUser = {
@@ -564,7 +564,7 @@ exports.forgotPin = async (req, res) => {
     const payload = { email: user.email, id: user.id };
     const token = jwt.sign(payload, secret);
 
-    const frontendUrl = "https://beasiswa.dev-palma.my.id";
+    const frontendUrl = process.env.REDIRECT_URL;
     const resetLink = `${frontendUrl}/reset-pin/${user.id}/${token}`;
 
     const htmlContent = `
