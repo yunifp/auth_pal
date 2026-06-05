@@ -299,7 +299,8 @@ exports.getOpPt = async (req, res) => {
       include: [
         {
           model: Role,
-          where: { id: 8 },
+          // PERBAIKAN: Menggunakan Op.in untuk mendukung role 8 dan 111
+          where: { id: { [Op.in]: [8, 111] } },
           through: { attributes: [] },
           required: true,
         },

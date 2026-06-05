@@ -202,9 +202,10 @@ const serveSecureFileProxy = async (req, res) => {
         Key: fileKey,
       });
 
-      if (!s3Client) {
+     if (!s3Client) {
         s3Client = new S3Client({
           region: process.env.S3_REGION || "wjv-1", 
+          endpoint: process.env.S3_ENDPOINT || undefined, 
           credentials: {
             accessKeyId: process.env.S3_ACCESS_KEY || process.env.access_key,
             secretAccessKey: process.env.S3_SECRET_KEY || process.env.secret_key,

@@ -302,17 +302,17 @@ exports.register = async (req, res) => {
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
         <h2 style="color: #2e7d32; text-align: center;">Pendaftaran Berhasil</h2>
         <p>Halo <b>${nama_lengkap}</b>,</p>
-        <p>Selamat, pendaftaran akun Anda di Aplikasi Palma Beasiswa telah berhasil. Berikut adalah detail informasi login Anda:</p>
+        <p>Selamat, pendaftaran akun Anda di Aplikasi Beasiswa SDM Sawit telah berhasil. Berikut adalah detail informasi akun Anda:</p>
         <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0;">
-          <p style="margin: 5px 0;"><b>User ID / Username:</b> ${user_id}</p>
-          <p style="margin: 5px 0;"><b>PIN / Password:</b> ${pin}</p>
+          <p style="margin: 5px 0;"><b>User ID:</b> ${user_id}</p>
+          <p style="margin: 5px 0;"><b>PIN    :</b> ${pin}</p>
         </div>
-        <p style="color: red; font-size: 13px;"><b>Penting:</b> Harap simpan informasi ini dengan baik. Jika Anda adalah penerima beasiswa, Anda diwajibkan untuk mengubah PIN ini setelah berhasil login.</p>
+        <p style="color: red; font-size: 13px;"><b>Penting:</b> Harap simpan informasi ini dengan baik !!!.</p>
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${process.env.REDIRECT_URL || 'https://beasiswa.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
+          <a href="${process.env.REDIRECT_URL || 'https://real.dev-palma.my.id'}" style="background-color: #2e7d32; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Login Sekarang</a>
         </div>
         <hr style="border: 0; border-top: 1px solid #eee; margin-top: 30px;" />
-        <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Palma Beasiswa. All rights reserved.</p>
+        <p style="font-size: 12px; color: #888; text-align: center;">&copy; ${new Date().getFullYear()} Aplikasi Beasiswa SDM Sawit. All rights reserved.</p>
       </div>
     `;
 
@@ -564,7 +564,7 @@ exports.forgotPin = async (req, res) => {
     const payload = { email: user.email, id: user.id };
     const token = jwt.sign(payload, secret);
 
-    const frontendUrl = process.env.REDIRECT_URL;
+    const frontendUrl = process.env.REDIRECT_URL || 'https://real.dev-palma.my.id';
     const resetLink = `${frontendUrl}/reset-pin/${user.id}/${token}`;
 
     const htmlContent = `
