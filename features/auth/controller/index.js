@@ -104,7 +104,7 @@ exports.login = async (req, res) => {
         iss: "palma",
       },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" },
+      { expiresIn: "7h" },
     );
 
     const refreshToken = jwt.sign(
